@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/c2997108/OpenPortablePipeline",
+  "commit": "53c159aeedff6038f0fe5ab032bdd4f064067483",
+  "license": "MIT",
+  "files": {
+    "nanopore-split-barcode.sh": {
+      "path": "PortablePipeline/scripts/nanopore~split-barcode",
+      "sha256": "c69f9a5ff2a7c7036d9767a094859b3d6d3c0e2022a1209d6151e195a6b4b362"
+    },
+    "nanopore-get-consensus.sh": {
+      "path": "PortablePipeline/scripts/nanopore~get-consensus",
+      "sha256": "fa22264a3364ca0aba7e44fb2a7f141ecbdf81b8defcf656574fa36e3ddcc2de"
+    }
+  }
+}

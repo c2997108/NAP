@@ -1,0 +1,21 @@
+{
+  "name": "nap-nanopore-amplicon-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser-based Nanopore amplicon splitting and consensus pipeline",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "prepare:pages": "node scripts/prepare-pages.mjs",
+    "test": "node --test tests && node scripts/test-integration.mjs && node scripts/test-definition-editor.mjs && node scripts/test-service-worker.mjs --docs && node scripts/check-package.mjs",
+    "test:service-worker": "node scripts/test-service-worker.mjs",
+    "test:pages": "node scripts/test-service-worker.mjs --docs",
+    "test:editor": "node scripts/test-definition-editor.mjs",
+    "test:progress": "node --test tests/demultiplex-progress.test.mjs tests/consensus-progress.test.mjs",
+    "test:integration": "node scripts/test-integration.mjs",
+    "check:package": "node scripts/check-package.mjs"
+  },
+  "devDependencies": { "playwright": "1.56.1" },
+  "license": "MIT"
+}

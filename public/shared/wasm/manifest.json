@@ -1,0 +1,27 @@
+{
+  "blastVersion": "2.16.0+",
+  "emscriptenVersion": "3.1.64",
+  "databaseVersion": 4,
+  "threads": 1,
+  "sourceSha256": "17c93cf009721023e5aecf5753f9c6a255d157561638b91b3ad7276fd6950c2b",
+  "datatoolVersion": "2.25.0",
+  "sqliteVersion": "3.46.0",
+  "files": {
+    "blastn.mjs": {
+      "bytes": 142963,
+      "sha256": "c9fc7194ed813779cd2cdd45a33ac506fc4e044853205e2c24282fffdc3ee24e"
+    },
+    "blastn.wasm": {
+      "bytes": 15695342,
+      "sha256": "05f5d6cab84b1f18f408ef126e7576e871424eaa135cd464d013cad3ca90dc26"
+    },
+    "makeblastdb.mjs": {
+      "bytes": 128600,
+      "sha256": "626da2a2830417f1b6a11b0a10d053d08aec38a3be527e378bbd0ae9695b2278"
+    },
+    "makeblastdb.wasm": {
+      "bytes": 9013913,
+      "sha256": "a12aa7b8157242b8440acd5669ac967a639984b7e14e037b5958532a7ddcb5fb"
+    }
+  }
+}

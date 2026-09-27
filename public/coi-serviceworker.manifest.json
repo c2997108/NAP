@@ -1,0 +1,17 @@
+{
+  "component": "coi-serviceworker",
+  "version": "0.1.7",
+  "license": "MIT",
+  "repository": "https://github.com/gzuidhof/coi-serviceworker",
+  "commit": "7b1d2a092d0d2dd2b7270b6f12f13605de26f214",
+  "files": {
+    "coi-serviceworker.js": {
+      "bytes": 6028,
+      "sha256": "e97bbac6017322d48aa54a5bc7ce473c725a4b7376ff245002e0ba71c3dcdd7e"
+    },
+    "coi-serviceworker-LICENSE.txt": {
+      "bytes": 1070,
+      "sha256": "3ee2c88cec9f3036fd4b0cba94e94485bb8b4673be7b8e0f3b1496c5baff75cb"
+    }
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "emscripten": "3.1.64",
+  "versions": {
+    "mafft": "7.525",
+    "vsearch": "2.29.3",
+    "cd-hit": "4.8.1",
+    "minimap2": "2.28",
+    "samtools": "1.17",
+    "htslib": "1.17",
+    "varscan": "2.4.6 JavaScript port",
+    "blastn": "2.16.0+"
+  },
+  "files": {
+    "cd-hit-est.mjs": {
+      "bytes": 76576,
+      "sha256": "9bb105d90f8cf5579c5b3fc21fe41832216e8cdf61f9fc2e0fa88a3d38d2fc44"
+    },
+    "cd-hit-est.wasm": {
+      "bytes": 345118,
+      "sha256": "66e92f0e63b6666ae4cb2a712e05fb0a68b20893fae9bd69d3c0bd90dadb2d35"
+    },
+    "cd-hit.mjs": {
+      "bytes": 76373,
+      "sha256": "5c00a1cfa6bf1b2f7f2ce5112ede672d1d43560c70664c2c06857746ef56da7a"
+    },
+    "cd-hit.wasm": {
+      "bytes": 326972,
+      "sha256": "702119ba95a93b9ffaa1bba6858eab54438d33ad7aa4989f5a273358279a321b"
+    },
+    "mafft-countlen.mjs": {
+      "bytes": 63582,
+      "sha256": "03e96e17e6b05e1af506159f31af48c54b3ab69936ce7a355353cba91d4f2a8a"
+    },
+    "mafft-countlen.wasm": {
+      "bytes": 23449,
+      "sha256": "6eaef8137512f75cf9be4875b350bdf0b0a461f3c1edebf4b5e7bf634af14493"
+    },
+    "mafft-disttbfast.mjs": {
+      "bytes": 64221,
+      "sha256": "b77f1c4eac517f95c0a8a65382349f9b9d45f9b78a9b83dbbe0be39c5d562f8d"
+    },
+    "mafft-disttbfast.wasm": {
+      "bytes": 379100,
+      "sha256": "0e349d6941c9bbacd88f5c6ec888d98c85e08ea33fffe03cd8d9782abef550d5"
+    },
+    "mafft-dndpre.mjs": {
+      "bytes": 63578,
+      "sha256": "a668df797b168017e02ef4d643fdc5719a489bd4b154565b87db7b3e62171eda"
+    },
+    "mafft-dndpre.wasm": {
+      "bytes": 144009,
+      "sha256": "eaa4881be91b13e82fc09cf07387d136523dbcafccc2f5cf734de2af255a9fdc"
+    },
+    "mafft-dvtditr.mjs": {
+      "bytes": 64215,
+      "sha256": "9d86b057964e37f72a6a6c70734cd82283231744d08fec2bc6bfc32e070b6b6e"
+    },
+    "mafft-dvtditr.wasm": {
+      "bytes": 441445,
+      "sha256": "1dee8096475a364e20f710115ade20ba95f804a70671c549b32577dc2a472cd3"
+    },
+    "mafft-f2cl.mjs": {
+      "bytes": 63574,
+      "sha256": "c124d70fed178c979c61ad8ba9bf21b6305ebfe57faea5ae972dacb297dad642"
+    },
+    "mafft-f2cl.wasm": {
+      "bytes": 143875,
+      "sha256": "4b39d1f4ed5d296d377ba74b7eafbece660d3dac4114eea5872ee4dc5f9f9713"
+    },
+    "mafft-makedirectionlist.mjs": {
+      "bytes": 63600,
+      "sha256": "01cf90fec9938ac9597966c1d694cab3d1ab8f313c631dc0b9a2a23433f62b6a"
+    },
+    "mafft-makedirectionlist.wasm": {
+      "bytes": 155044,
+      "sha256": "055ab11e97c5cb1ba7d7397fee2f94a2b45bcff1be4aa0b17d27e472c0400b4d"
+    },
+    "mafft-pairlocalalign.mjs": {
+      "bytes": 64229,
+      "sha256": "894b55936618c9df408570cc009a8bb3d7cd2f14322b872f86a7d6d87fa2fc54"
+    },
+    "mafft-pairlocalalign.wasm": {
+      "bytes": 313341,
+      "sha256": "6ccc3394c8eed9d1fb8af7f6e4517a9660232a44d98675ac4c273545cd738333"
+    },
+    "mafft-setdirection.mjs": {
+      "bytes": 63590,
+      "sha256": "b3eb0cc96fe04a464517aa4789612c3c08315b071cc8e948208035609f9f3ebe"
+    },
+    "mafft-setdirection.wasm": {
+      "bytes": 29692,
+      "sha256": "01833de20206478dbe51695522e5c7f986e7ae63ac0c09ab96cdfcaadb63deee"
+    },
+    "mafft-tbfast.mjs": {
+      "bytes": 64213,
+      "sha256": "f9b345cc18bcd084be53ec9a7d2f90cb18755bcf34bdf8b351740f26febba896"
+    },
+    "mafft-tbfast.wasm": {
+      "bytes": 450173,
+      "sha256": "a15ab30bb28081e256dfe9a12c87042df817e5436db7e858c472e73426672bff"
+    },
+    "minimap2.mjs": {
+      "bytes": 64799,
+      "sha256": "6afb28958ae20de4859189ca0c4b319bd99f30762d12a99b44fdc71251fe70bf"
+    },
+    "minimap2.wasm": {
+      "bytes": 262305,
+      "sha256": "edca720276784c094c16499bb18fa477453c66ad37443e1485630b304f77044e"
+    },
+    "samtools.mjs": {
+      "bytes": 85700,
+      "sha256": "73fdf1e634a2e992d537b2feafb72058136ff980115bb809a5ba66605ba67e9c"
+    },
+    "samtools.wasm": {
+      "bytes": 1156869,
+      "sha256": "6a80f5b19ac8ffd0480271d0fac09e78eca5ecbb5844678a5470bf30834b6ca3"
+    },
+    "vsearch.mjs": {
+      "bytes": 87121,
+      "sha256": "21a9932562911d69e59aa79c528a6f8df103a6dac413fe1e6790cf7c135469dd"
+    },
+    "vsearch.wasm": {
+      "bytes": 520069,
+      "sha256": "69757b7a85162116753dcbeeebc4ee32ae62d1cb26d58d7fab7a68c0d3d5e988"
+    },
+    "vsearch.worker.mjs": {
+      "bytes": 294,
+      "sha256": "5e53987fb26c1fe6b4d5d8c0ebf97f2ecd89c64ea1479a7d886474f3b0eb731e"
+    }
+  },
+  "source": {
+    "path": "../sources/get-consensus-wasm-source.tar.gz",
+    "bytes": 69797999,
+    "sha256": "614abf308d1bd1450ffbb3eb910bfc1a7e6af74774ca129fd7faedbf5c9644fa"
+  },
+  "sharedFiles": {
+    "../../shared/wasm/blastn.mjs": {
+      "bytes": 142963,
+      "sha256": "c9fc7194ed813779cd2cdd45a33ac506fc4e044853205e2c24282fffdc3ee24e"
+    },
+    "../../shared/wasm/blastn.wasm": {
+      "bytes": 15695342,
+      "sha256": "05f5d6cab84b1f18f408ef126e7576e871424eaa135cd464d013cad3ca90dc26"
+    },
+    "../../shared/wasm/makeblastdb.mjs": {
+      "bytes": 128600,
+      "sha256": "626da2a2830417f1b6a11b0a10d053d08aec38a3be527e378bbd0ae9695b2278"
+    },
+    "../../shared/wasm/makeblastdb.wasm": {
+      "bytes": 9013913,
+      "sha256": "a12aa7b8157242b8440acd5669ac967a639984b7e14e037b5958532a7ddcb5fb"
+    }
+  }
+}

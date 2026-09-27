@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#183e32"><title>NAP · Nanopore Amplicon Pipeline</title>
+  <link rel="icon" href="data:,"><link rel="stylesheet" href="./nap.css">
+</head>
+<body>
+  <header class="app-header"><div class="brand"><span class="brand-mark">NAP</span><div><h1>Nanopore Amplicon Pipeline</h1><p>FASTQの分割から、コンセンサス配列まで。</p></div></div><span class="local-badge">● ブラウザ内で解析</span></header>
+  <main>
+    <div class="workspace-bar"><div class="tabs" role="tablist" aria-label="解析ステップ">
+      <button id="tab-split-reads" role="tab" aria-selected="true" aria-controls="panel-split-reads"><span>01</span> split-reads</button>
+      <button id="tab-get-consensus" role="tab" aria-selected="false" aria-controls="panel-get-consensus" tabindex="-1"><span>02</span> get-consensus <small id="output-count" hidden></small></button>
+    </div><p id="workspace-status" role="status" aria-live="polite">入力待ち</p></div>
+    <section id="panel-split-reads" role="tabpanel" aria-labelledby="tab-split-reads">
+      <div class="stage-heading"><div><h2>サンプルごとにFASTQを分割</h2><p>FASTQ、primer.fa、sample.txtを指定します。分割結果は次のタブへ渡せます。</p></div><button id="open-consensus" class="primary" disabled>分割結果を選んでget-consensusへ →</button></div>
+      <iframe id="split-frame" data-src="./split-reads/" title="split-reads" allow="cross-origin-isolated"></iframe>
+    </section>
+    <section id="panel-get-consensus" role="tabpanel" aria-labelledby="tab-get-consensus" hidden>
+      <div class="stage-heading"><div><h2>選んだFASTQからコンセンサスを作成</h2><p>分割結果を渡すか、下のファイル選択欄から保存済みFASTQを読み込みます。</p></div></div>
+      <section class="handoff-card" aria-labelledby="handoff-title">
+        <div class="handoff-head"><h3 id="handoff-title">split-readsの分割結果</h3><span id="selection-count">0 ファイル選択</span></div>
+        <p id="handoff-empty">split-readsで分割すると、ここにサンプル別FASTQが表示されます。</p>
+        <div id="handoff-files" hidden><div class="selection-tools"><label>サンプルを絞り込む<input id="sample-filter" type="search" placeholder="サンプル名" autocomplete="off"></label><div><button id="select-all">すべて選択</button><button id="select-none">選択を解除</button></div></div>
+          <div class="sample-list"><table><thead><tr><th>選択</th><th>サンプル / FASTQ</th><th>リード数</th><th>サイズ</th></tr></thead><tbody id="split-output-list"></tbody></table></div>
+        </div>
+        <div class="transfer-actions"><button id="transfer-selected" class="primary" disabled>選択したFASTQをget-consensusに渡す</button><p id="transfer-status" role="status" aria-live="polite">ダウンロード・再アップロードは不要です。受け渡し後に解析条件を確認して開始してください。</p></div>
+      </section>
+      <iframe id="consensus-frame" data-src="./get-consensus/" title="get-consensus" allow="cross-origin-isolated"></iframe>
+    </section>
+    <p class="session-note">タブを切り替えても入力・結果・実行中の解析は保持されます。ページの再読み込み・終了で消えるため、結果は保存してください。</p>
+  </main>
+  <footer><span>NAP · Nanopore Amplicon Pipeline</span><div><a href="./shared/wasm/THIRD_PARTY_NOTICES.txt" target="_blank" rel="noopener">BLASTライセンス</a><a href="./get-consensus/wasm/THIRD_PARTY_NOTICES.txt" target="_blank" rel="noopener">コンセンサス解析のライセンス</a></div></footer>
+  <script type="module" src="./bootstrap.mjs" data-nap-app="./nap.mjs"></script>
+</body>
+</html>

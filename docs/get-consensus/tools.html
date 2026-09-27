@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>get-consensus · WASM tools</title>
+<style>
+body{font:16px/1.7 system-ui,sans-serif;margin:40px auto;padding:0 24px;max-width:980px;background:#f8fafb;color:#192b38}h1{font-size:28px}textarea,pre{box-sizing:border-box;width:100%;font:13px/1.5 monospace;background:white;border:1px solid #b5c6ce;border-radius:6px;padding:14px}textarea{height:210px}pre{white-space:pre-wrap;overflow-wrap:anywhere}button,select{font:inherit;padding:8px 14px;border:1px solid #9bafb9;border-radius:6px}button{cursor:pointer;background:#135f70;color:white}button:disabled{opacity:.5}.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center}small{color:#47616f}
+</style>
+<h1>get-consensus · WASM tools</h1>
+<p>MAFFT 7.525 / VSEARCH 2.29.3 / CD-HIT 4.8.1 の動作確認ページです。配列はブラウザー内で処理されます。</p>
+<small>個別ツールを試す画面です。コンセンサス生成パイプラインは NAP の get-consensus タブで実行できます。</small>
+<p><label for="input">DNA 配列（FASTA）</label></p>
+<textarea id="input" spellcheck="false">&gt;read1
+ACGTGCTAGCTACGATCGATGGCATAGCTAGGCTAACGTTAGCCTGACTGATCGTAGCTAGCATGACCTAGGCTAGCTAGCTAGGTACCGATGATCGTACGCTAGCTGACGATCGATGCTAGCATCGT
+&gt;read2
+ACGTGCTAGCTACGATCGATGGCATAGCTAGGCTAACGTTAGCCTGACTGATCGTAGCTAGCATGACCTAGGCTAGCTAGCTAGCTAGGTACCGATGATCGTACGCTAGCTGACGATCGATGCTAGCATCGT
+&gt;indel
+ACGTGCTAGCTACGATCGATGGCATAGCTAGGCTAACGTTAGCCTGACTGATCGTAGCTAGCATGACCTAAAGGCTAGCTAGCTAGGTACCGATGATCGTACGCTAGCTGACGATCGATGCTAGCATCGT
+</textarea>
+<div class="controls"><select id="tool" aria-label="ツール"><option value="mafft">MAFFT --auto</option><option value="vsearch">VSEARCH --cluster_fast</option><option value="cd-hit">CD-HIT</option><option value="cd-hit-est">CD-HIT-EST</option></select><label><input type="checkbox" id="direction">逆相補鎖も処理</label><button id="run">実行</button><button id="cancel" disabled>中止</button><span id="status" role="status">準備完了</span></div>
+<h2>結果</h2><pre id="output"></pre>
+<details><summary>実行ログ</summary><pre id="log"></pre></details>
+<p><small><a href="./wasm/THIRD_PARTY_NOTICES.txt">ライセンス</a> · <a href="./sources/get-consensus-wasm-source.tar.gz">対応ソースとビルド手順</a></small></p>
+<script type="module" src="../bootstrap.mjs" data-nap-app="./demo.mjs"></script>
+</html>

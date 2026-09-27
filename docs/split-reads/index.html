@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>split-reads · NAP</title>
+  <link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./nanopore.css"><link rel="stylesheet" href="../engine.css">
+  <link rel="stylesheet" href="./definition-editor.css">
+</head>
+<body>
+<main>
+  <header><div><span class="eyebrow">NANOPORE · BARCODE DEMULTIPLEXING</span><h1>Barcode splitter</h1><p>プライマー対からサンプルを判定し、プライマーを除いた FASTQ を保存。</p></div><span class="badge">● ブラウザ内で処理</span></header>
+  <div class="toolbar"><button id="load-test" class="secondary">分割デモを読み込む</button><button id="test-settings" class="secondary">比較用設定（blastn / 80%）</button><button id="cancel" class="secondary danger">中止・リセット</button><span id="status" role="status">入力待ち</span></div>
+  <div class="inputs">
+    <section class="card"><h2><span class="step">1</span>入力ファイル</h2>
+      <label for="fastq-files">FASTQ / FASTQ.gz（複数選択可）</label><input type="file" id="fastq-files" accept=".fastq,.fq,.fastq.gz,.fq.gz,.gz" multiple><p id="fastq-info" class="hint">ファイルを選択してください。</p>
+      <p class="definition-label">プライマー・サンプルの入力方法</p>
+      <div class="definition-modes" role="tablist" aria-label="プライマー・サンプルの入力方法"><button id="mode-files" role="tab" aria-selected="true" aria-controls="definition-files">ファイルを選択</button><button id="mode-table" role="tab" aria-selected="false" aria-controls="definition-editor" tabindex="-1">表で作成・編集</button></div>
+      <div id="definition-files" role="tabpanel" aria-labelledby="mode-files">
+        <label for="primer-file">プライマー配列 · FASTA</label><input type="file" id="primer-file" accept=".fa,.fasta,.fna,.txt"><p id="primer-info" class="hint">primer.fa</p>
+        <label for="sample-file">サンプル表 · TSV</label><input type="file" id="sample-file" accept=".txt,.tsv"><p id="sample-info" class="hint">名前 / Forward primer / Reverse primer / 最小アンプリコン長 / 最大長</p>
+        <p class="hint">primer FASTAとsample.txtの両方を選ぶと、自動で「表で作成・編集」を開きます。primer FASTAだけでも「表で作成・編集」を押すと読み込めます。</p>
+      </div>
+      <p id="definition-table-info" class="hint" hidden>下のプライマー表とサンプル表の内容を分割処理に使用します。</p>
+      <p class="hint">長さはプライマーを含む塩基数。最小・最大長の空欄はそれぞれ制限なし（最大長0も上限なし）。名前には半角英数字と <code>- . _</code> を使用できます。</p>
+    </section>
+    <section class="card"><h2><span class="step">2</span>判定条件</h2>
+      <label for="task">BLAST 検索モード</label><select id="task"><option value="megablast">megablast · 元スクリプトの既定値</option><option value="blastn">blastn · ミスマッチに対する感度を上げる</option></select>
+      <div class="option-grid">
+        <label>プライマー被覆率<input id="primer-coverage" type="number" min="0.01" max="1" step="0.01" value="0.6"></label>
+        <label>プライマー一致率 (%)<input id="primer-identity" type="number" min="0" max="100" step="1" value="80"></label>
+        <label>バーコード被覆率<input id="barcode-coverage" type="number" min="0.01" max="1" step="0.01" value="0.9"></label>
+        <label>バーコード一致率 (%)<input id="barcode-identity" type="number" min="0" max="100" step="1" value="90"></label>
+      </div>
+      <div class="option-grid"><label>1バッチのリード数<input id="batch-size" type="number" min="1" max="10000" step="1" value="300"></label><label>同時処理ファイル数<input id="concurrency" type="number" min="1" max="16" step="1" value="8"></label></div>
+      <p class="hint">FASTQ ファイルごとに同時処理します。1 にすると順次処理します。</p>
+      <div class="checks"><label><input id="expand" type="checkbox" checked> 縮重塩基を展開する</label><label><input id="suppress-chimeras" type="checkbox"> 低一致率のヒットもキメラ抑制に使う</label><label><input id="diagnostics" type="checkbox"> BLAST 判定根拠も保存する</label></div>
+      <p class="hint">既定値は元スクリプトに合わせています。比較用設定は検索モードとバーコード一致率を変更します。分割デモは既定値で実行できます。</p>
+    </section>
+  </div>
+  <section id="definition-editor" class="card definition-editor" role="tabpanel" aria-labelledby="mode-table" hidden>
+    <fieldset id="definition-fields"><legend class="visually-hidden">プライマーとサンプルの入力表</legend>
+      <div class="section-head"><div><h2>プライマー・サンプル入力表</h2><p class="hint">表の内容をそのまま分割に使用します。プライマーは「配列名 塩基配列」の2列をタブまたはスペースで区切り、配列名の欄に複数行まとめて貼り付けると行が自動で追加されます。</p></div><button id="import-definitions" class="secondary">選択済みファイルを表に読み込む</button></div>
+      <p class="hint">「ファイルを選択」でprimer FASTAとsample.txtの両方を指定すると、自動で表に読み込みます。primer FASTAだけでも「表で作成・編集」を押すと読み込み、サンプル表を作成します。方向はFASTAのForward / Reverse指定を優先し、指定がなければsample.txtの参照から判定します。判定できない配列はForwardに配置します。「選択済みファイルを表に読み込む」でファイルの内容を再読込みできます。</p>
+      <p id="definition-duplicate-warning" class="definition-duplicate-warning" role="status" aria-live="polite" hidden></p>
+      <div class="primer-grids">
+        <section><div class="primer-grid-heading"><h3>Forward プライマー</h3><button id="add-forward" class="secondary">＋ Forward行を追加</button></div><div class="definition-scroll"><table id="forward-primers" class="primer-grid"><thead><tr><th scope="col">配列名</th><th scope="col">塩基配列（5′ → 3′）</th></tr></thead><tbody></tbody></table></div></section>
+        <section><div class="primer-grid-heading"><h3>Reverse プライマー</h3><button id="add-reverse" class="secondary">＋ Reverse行を追加</button></div><div class="definition-scroll"><table id="reverse-primers" class="primer-grid"><thead><tr><th scope="col">配列名</th><th scope="col">塩基配列（5′ → 3′）</th></tr></thead><tbody></tbody></table></div></section>
+      </div>
+      <p class="hint">Enterで次の行の配列名へ移動し、最終行では新しいプライマー行を追加します。Tabで次の入力欄へ移動できます。</p>
+      <p class="hint">配列名が空欄の場合は、行番号に応じてForwardはF1、F2…、ReverseはR1、R2…を使用します。配列名・塩基配列とも空欄の行は使用しません。</p>
+      <p class="hint">名前に使える文字は半角英数字と - . _ です。塩基配列は半角アルファベットのみ入力できます（数字・記号・空白は不可）。配列は入力した5′ → 3′の向きで保存し、小文字は大文字へ変換します。保存・分割には4塩基以上のDNA配列が必要で、IUPAC縮重塩基にも対応します。</p>
+      <div class="sample-grid-heading"><h3>サンプル表 · Forward（縦）× Reverse（横）</h3><label class="inline-check"><input type="checkbox" id="show-cell-lengths"> セルごとの長さも表示</label></div>
+      <div class="length-defaults"><label>最小アンプリコン長 <span class="length-note">0: 制限なし</span><input id="default-min-length" type="number" min="0" step="1" placeholder="制限なし"></label><label>最大アンプリコン長 <span class="length-note">0: 制限なし</span><input id="default-max-length" type="number" min="0" step="1" placeholder="制限なし"></label><button id="apply-default-lengths" class="secondary">全セルに長さを適用</button></div>
+      <label>サンプル名が空欄の場合 <select id="empty-sample-names"><option value="generate">s_F名_R名で出力する</option><option value="omit">出力しない</option></select></label>
+      <p class="hint">交点にサンプル名を入力します。空欄は初期設定で s_F名_R名 を使用します。Enterで同じ列の次の行へ移動し、最終行では新しいForwardプライマーの入力欄へ移動します。配列名または塩基配列を入力するとサンプル表にも行が追加されます。長さの空欄は制限なし（最大長0も上限なし）です。長さは両端のプライマーを含みます。プライマー名を変更しても入力済みのサンプル名と長さは保持します。</p>
+      <span id="matrix-name-label" class="visually-hidden">サンプル名</span><span id="matrix-min-label" class="visually-hidden">最小長</span><span id="matrix-max-label" class="visually-hidden">最大長</span>
+      <p id="matrix-empty" class="hint">ForwardとReverseのプライマーを入力すると、組み合わせの表が表示されます。</p>
+      <div class="definition-scroll sample-matrix-scroll"><table id="sample-matrix" class="sample-matrix" hidden><thead></thead><tbody></tbody></table></div>
+      <div class="definition-actions"><button id="save-primer-fasta" class="secondary fastq-download">primer.fasta を保存</button><button id="save-sample-text" class="secondary">sample.txt を保存</button><p id="definition-status" role="status" aria-live="polite" class="hint"></p></div>
+      <details class="definition-preview" open><summary>生成ファイルのプレビュー</summary><div><label>primer.fasta<textarea id="primer-preview" readonly spellcheck="false" aria-label="primer.fasta プレビュー"></textarea></label><label>sample.txt<textarea id="sample-preview" readonly spellcheck="false" aria-label="sample.txt プレビュー"></textarea></label></div></details>
+    </fieldset>
+  </section>
+  <button id="split" class="primary run">FASTQ を分割する</button>
+  <section class="card output"><div class="section-head"><h2><span class="step">3</span>分割結果</h2><div class="download-actions"><button id="download-fastq-zip" class="secondary fastq-download" disabled>分割 FASTQ をまとめて保存</button><button id="download-zip" class="secondary" disabled>すべて ZIP で保存</button></div></div>
+    <p class="hint">「分割 FASTQ をまとめて保存」で、サンプル別 FASTQ をひとつの ZIP に保存できます。</p>
+    <progress id="progress" max="1" value="0" aria-label="入力の処理状況"></progress><p id="progress-label" class="hint">FASTQ の読取り → BLAST → バーコード確認 → トリミング・分割</p>
+    <p class="hint">各ファイルの総リード数を確認し、分割を終えたリードの割合で進捗を更新します。最終集計が終わると100%になります。</p>
+    <div class="table-scroll file-progress" id="file-progress" hidden><table><thead><tr><th>入力ファイル</th><th>状態</th><th>進捗</th><th>処理済み / 全リード</th><th>分類済みリード</th></tr></thead><tbody></tbody></table></div>
+    <div id="summary" class="summary" aria-live="polite"><p class="hint">実行するとサンプルごとの出力が表示されます。</p></div>
+    <div class="table-scroll"><table id="sample-results"><thead><tr><th>サンプル</th><th>出力配列数</th><th>塩基数</th><th>最短 / 最長</th><th>FASTQ</th></tr></thead><tbody></tbody></table></div>
+    <p id="result-note" class="hint"></p>
+  </section>
+  <div class="details"><section class="card"><h2>出力ファイル</h2><p class="hint">サンプル別 FASTQ、未分類 FASTQ、判定座標、集計表。ページを閉じる前に保存してください。</p><ul id="files"></ul></section><section class="card"><h2>処理ログ</h2><pre id="log" tabindex="0" aria-live="polite"></pre></section></div>
+  <footer><a href="https://github.com/c2997108/OpenPortablePipeline/blob/53c159aeedff6038f0fe5ab032bdd4f064067483/PortablePipeline/scripts/nanopore~split-barcode" target="_blank" rel="noopener">元の nanopore~split-barcode</a> の分割処理を JavaScript + NCBI BLAST+ 2.16.0 WASM に移植。<br>FASTQ ファイル単位で並列処理。各 BLAST は1スレッド。出力はブラウザのメモリ内に保持。配列のサーバー送信はありません。</footer>
+</main>
+<script type="module" src="../bootstrap.mjs" data-nap-app="./app/demultiplex-ui.mjs"></script>
+</body></html>

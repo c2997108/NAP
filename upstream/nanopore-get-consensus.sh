@@ -1,0 +1,385 @@
+#!/bin/bash
+
+explanation='
+This pipeline clusters Nanopore sequences and generates a consensus sequence for each cluster, making it a highly useful alternative to Sanger sequencing with MAFFT.
+'
+inputdef='
+input_1:directory:Nanopore FASTQ(.gz) files:*.fastq,*.fq,*.fastq.gz,*.fq.gz
+'
+optiondef='
+opt_c:cpu threads:8
+opt_m:memory limit (GB):16
+opt_i:Identity threshold during the first clustering (0-1):0.97
+opt_k:Minimum read count per cluster for consensus generation:3
+opt_n:Maximum number of reads used for consensus sequence generation:30
+opt_j:Identity threshold during the second clustering (0-1):0.99
+opt_l:Identity threshold during the third clustering (0-1):1
+opt_v:vsearch option (If you want to search the complementary strand as well, use --strand both):
+opt_f:mafft option (If you want to search the complementary strand as well, use --adjustdirection):
+opt_a:Identity threshold during the last blastn (0-1):0.90
+opt_b:blastn bitscore threshold:200
+opt_d:Minimum read depth for output haplotypes:30
+opt_s:the number of reads per split FASTQ at blastn:300
+'
+runcmd="$0 -c #opt_c# -m #opt_m# -i #opt_i# -k #opt_k# -j #opt_j# -n #opt_n# -l #opt_l# -a #opt_a# -b #opt_b# -d #opt_d# -s #opt_s# #input_1#"
+
+export IM_MAFFT="c2997108/ppmultiarch:vsearch_mafft_muscle_emboss_exonerate_6"
+export IM_SEQKIT="c2997108/ppmultiarch:vsearch_mafft_muscle_emboss_exonerate_6"
+export IM_BLAST="c2997108/ppmultiarch:blast_seqkit_1"
+export IM_CDHIT="c2997108/biocontainers:cd-hit_4.8.1"
+export IM_EXCEL="c2997108/ppmultiarch:yoshitake_merge"
+export IM_KYST="c2997108/ppmultiarch:yoshitake_kystudio-align"
+
+source "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/common.sh"
+
+set -eux
+set -o pipefail
+
+r=()
+while IFS= read -r pp_line; do r+=("$pp_line"); done < <(find "$input_1"/ |grep -E '[.](fastq|fq)$' || true)
+rgz=()
+while IFS= read -r pp_line; do rgz+=("$pp_line"); done < <(find "$input_1"/ |grep -E '[.](fastq|fq)[.]gz$' || true)
+
+if [ ${#r[@]} = 0 -a ${#rgz[@]} = 0 ]; then echo "Place fastq(.gz) files in input folder"; post_processing; fi
+
+#最初のクラスタリング
+cat << 'EOF' > run-consensus.sh
+#!/bin/bash
+set -eux
+set -o pipefail
+
+i="$1"
+opt_i="$2" #0.97
+opt_k="$3" #10
+N_CPU="$4"
+opt_v="$5"
+scriptdir="$(cd "$(dirname "$0")" && pwd)"
+
+workdir="work/$(basename "$i").dir"
+mkdir -p "$workdir"
+rm -f "$workdir"/cluster*_*reads.fasta
+
+has_fastq_qscore_tag() {
+ if [[ "$i" == *.gz ]]; then
+  zcat "$i"
+ else
+  cat "$i"
+ fi | awk 'NR % 4 == 1 && $0 ~ /(^|[[:space:]])qs:f:/ {found=1} END{exit(found ? 0 : 1)}'
+}
+
+run_legacy_vsearch_clustering() {
+ vsearch $opt_v --threads $N_CPU --cluster_fast "$i" --id "$opt_i" --centroids "$workdir"/vsearch-center.fasta --uc "$workdir"/vsearch-clusters.uc
+ if [[ "$i" == *.gz ]]; then
+  zcat "$i"
+ else
+  cat "$i"
+ fi | sed 's/\t/ /g'|seqkit fx2tab |awk -F'\t' -v dir="$workdir" -v minreads="$opt_k" '
+  FILENAME==ARGV[1]{split($1,arr," "); seq[arr[1]]=$2; q[arr[1]]=$3}
+  FILENAME==ARGV[2]{if($1=="S"){s[$2]=$9}else if($1=="H"){c[$2]++; r[$2][c[$2]]=$9}}
+  END{
+   for(i in c){
+    if(c[i]+1>=minreads){
+     print i"\t"c[i]+1; print ">"s[i]"\n"seq[s[i]] > dir"/cluster"i"_"c[i]+1"reads.fasta";
+     for(j in r[i]){print ">"r[i][j]"\n"seq[r[i][j]] > dir"/cluster"i"_"c[i]+1"reads.fasta"}
+    }
+   }
+  }' /dev/stdin "$workdir"/vsearch-clusters.uc
+}
+
+if has_fastq_qscore_tag ; then
+ iterative_out="$workdir"/iterative_qbin_vsearch
+ rm -rf "$iterative_out"
+ python3 /usr/local/bin/iterative_qbin_vsearch.py \
+  --fastq "$i" \
+  --qscore-source fastq-tag \
+  --out-dir "$iterative_out" \
+  --stages 1 2 3 4 5 6 7 8 9 10 all \
+  --q-min 10 \
+  --q-top 20 \
+  --min-cluster-size "$opt_k" \
+  --identity-error-multiplier 2 \
+  --vsearch vsearch
+ python3 /usr/local/bin/iterative_trace_to_cluster_fastas.py \
+  --fastq "$i" \
+  --trace-tsv "$iterative_out"/read_to_size3plus_consensus.dedup100.tsv \
+  --out-dir "$workdir" \
+  --min-reads "$opt_k" \
+  --map-tsv "$workdir"/iterative_cluster_fasta_map.tsv
+else
+ run_legacy_vsearch_clustering
+fi
+
+EOF
+
+fq=()
+while IFS= read -r pp_line; do fq+=("$pp_line"); done < <(find "$input_1/" | grep -E "[.](fastq|fq)($|[.]gz$)")
+for i in ${fq[@]+"${fq[@]}"}; do
+ echo "$ENV_MAFFT bash run-consensus.sh $(pp_shell_quote "$i") $opt_i $opt_k $N_CPU '$opt_v'"
+done | DOPARALLEL
+
+WAITPARALLEL
+
+mkdir -p output-consensus-fastq output-consensus-alignments
+
+#最初のクラスタリング結果のコンセンサス配列を作成
+cat << 'EOF' > run-consensus2.sh
+#!/bin/bash
+set -eux
+set -o pipefail
+
+j="$1"
+i="$2"
+opt_n="$3" #30
+N_CPU="$4"
+workdir="$5"
+opt_f="$6"
+
+#for j in `ls $workdir/cluster*_*reads.fasta 2> /dev/null`; do
+ seqkit fx2tab "$j" > "$j".tab
+ head -n $((10#$opt_n)) "$j".tab | awk '{print ">"$1"\n"$2}' > "$j".sub
+ #head -n $((10#$opt_n*2)) $j > $j.sub #10#は10進数という意味 030のように0から始まると8進数扱いになるのを避けるため
+ mafft $opt_f --thread $N_CPU --auto "$j".sub > "$j".sub.mafft
+ #muscle -align $j.sub -output $j.sub.muscle
+ #cons -sequence $j.sub.mafft -outseq $j.sub.mafft.fa
+ extract_consensus.py "$j".sub.mafft > "$j".sub.mafft.fq
+ seqkit fq2fa "$j".sub.mafft.fq > "$j".sub.mafft.fa
+ sed 's/n//g' "$j".sub.mafft.fa > "$j".sub.mafft.fa.rmn
+ fastareformat "$j".sub.mafft.fa.rmn > "$j".sub.mafft.fa.rmn2
+ (echo ">consensus_$(basename "$i")_$(basename "$j" .fasta)"; tail -n+2 "$j".sub.mafft.fa.rmn2) > "$j".sub.mafft.fa.rmn3
+ cat "$j".sub.mafft.fa.rmn3 "$j".sub > "$j".sub.fa
+ mafft $opt_f --thread $N_CPU --auto "$j".sub.fa > "$j".sub.fa.mafft
+ #muscle -align $j.sub.fa -output $j.sub.fa.muscle
+ cp "$j".sub.mafft.fa.rmn3 "$workdir"/round1/"$(basename "$i")_$(basename "$j")"
+ cp "$j".sub.fa.mafft "$workdir"/round1/"$(basename "$i")_$(basename "$j")".mafft
+ (echo "@consensus_$(basename "$i")_$(basename "$j" .fasta)"; tail -n+2 "$j".sub.mafft.fq) > "$workdir"/round1-fastq/"$(basename "$i")_$(basename "$j")".fq
+#done
+
+EOF
+
+fq=()
+while IFS= read -r pp_line; do fq+=("$pp_line"); done < <(find "$input_1/" | grep -E "[.](fastq|fq)($|[.]gz$)")
+for i in ${fq[@]+"${fq[@]}"}; do
+ workdir="work/$(basename "$i").dir"
+ mkdir -p "$workdir"/round1 "$workdir"/round1-fastq
+ for j in "$workdir"/cluster*_*reads.fasta; do
+  [ -e "$j" ] || continue
+  echo "$ENV_MAFFT bash run-consensus2.sh $(pp_shell_quote "$j") $(pp_shell_quote "$i") $opt_n $N_CPU $(pp_shell_quote "$workdir") '$opt_f'"
+ done
+done | DOPARALLEL
+
+WAITPARALLEL
+
+#1回目のコンセンサス配列を私用した2回目のクラスタリング
+cat << 'EOF' > run-consensus3.sh
+#!/bin/bash
+set -eux
+set -o pipefail
+
+j="$1"
+opt_j="$2" #0.99
+N_CPU="$3"
+workdir="$4"
+i="$5"
+opt_v="$6"
+opt_d="$7" #30
+opt_f="$8"
+opt_n="$9" #30
+
+export PATH=/opt/conda/bin:$PATH
+vsearch $opt_v --notrunclabels --threads $N_CPU --cluster_fast "$j" --id "$opt_j" --centroids "$workdir"/round2/vsearch-center.fasta --uc "$workdir"/round2/vsearch-clusters.uc
+awk -F'\t' '{a=$9; sub(/.*_cluster/,"",a); sub(/reads/,"",a); split(a,arr,"_"); reads=arr[2]} $1=="S"{data[$9][$9]=reads; total[$9]+=reads} $1=="H"{data[$10][$9]=reads; total[$10]+=reads} END{PROCINFO["sorted_in"]="@val_num_desc"; for(i in total){for(j in data[i]){print i"\t"total[i]"\t"j; break}}}' "$workdir"/round2/vsearch-clusters.uc > "$workdir"/round2/vsearch-clusters.uc.summary
+#コンセンサス配列のクラスタリングの結果で同一クラスターと判定されたround1の配列数を足してround2の結果としてコピー
+cat "$workdir"/round2/vsearch-clusters.uc.summary | awk -F'\t' -v dir="$workdir" 'function q(s,  Q){Q=sprintf("%c",39); gsub(Q,Q "\"" Q "\"" Q,s); return Q s Q} {print "cp "q(dir"/round1/"substr($3,11)".fasta")" "q(dir"/round2/cluster"NR"_"$2"reads.fasta")}'|bash
+cat "$workdir"/round2/vsearch-clusters.uc.summary | awk -F'\t' -v dir="$workdir" 'function q(s,  Q){Q=sprintf("%c",39); gsub(Q,Q "\"" Q "\"" Q,s); return Q s Q} {print "cp "q(dir"/round1/"substr($3,11)".fasta.mafft")" "q(dir"/round2/cluster"NR"_"$2"reads.fasta.mafft")}'|bash
+cat "$workdir"/round2/vsearch-clusters.uc.summary | awk -F'\t' -v dir="$workdir" 'function q(s,  Q){Q=sprintf("%c",39); gsub(Q,Q "\"" Q "\"" Q,s); return Q s Q} {print "cp "q(dir"/round1-fastq/"substr($3,11)".fasta.fq")" "q(dir"/round2-fastq/cluster"NR"_"$2"reads.fq")}'|bash
+for k in "$workdir"/round2/cluster*_*reads.fasta; do
+ i2="$(basename "$i"|sed 's/[.]gz$//; s/[.]\(fastq\|fq\)$//'|tr ' \t' '__')_$(basename "$k" .fasta)"
+ mkdir -p "$workdir"/round3
+ (echo ">$i2"; tail -n+2 "$k") > "$workdir"/round3/"$i2".fasta #output/$i2.fasta
+ cat "$k".mafft |sed 's/>consensus_.*_cluster.*_.*reads/>consensus/' > output-consensus-alignments/"$i2".fasta.mafft
+ (echo "@$i2"; tail -n+2 "$workdir"/round2-fastq/"$(basename "$k" .fasta)".fq) > output-consensus-fastq/"$i2".fq
+done
+
+#ここからコンセンサス配列にリードをマッピングして、得られたSNP/INDELをリードフェージングし、ハプロタイプごとにコンセンサス配列を分離する
+r3prefix="$workdir"/round3
+cat  "$r3prefix"/*.fasta > "$r3prefix".fa
+#i=input_1/s_03_02.fq
+minimap2 -ax map-ont -t $N_CPU "$r3prefix".fa "$i" |samtools sort -@ $N_CPU -o "$r3prefix".bam; samtools index "$r3prefix".bam
+samtools mpileup -f "$r3prefix".fa -q 10 -Q 13 -B "$r3prefix".bam > "$r3prefix".mpileup
+java -jar /usr/local/bin/VarScan.jar mpileup2snp  "$r3prefix".mpileup  --min-coverage 10  --min-reads2 2  --min-var-freq 0.10  --p-value 0.05  --output-vcf 1 | bgzip -c >  "$r3prefix".snp.vcf.gz
+java -jar /usr/local/bin/VarScan.jar mpileup2indel  "$r3prefix".mpileup  --min-coverage 10  --min-reads2 2  --min-var-freq 0.10  --p-value 0.05  --output-vcf 1 | bgzip -c >  "$r3prefix".indel.vcf.gz
+tabix -f -p vcf  "$r3prefix".snp.vcf.gz
+tabix -f -p vcf  "$r3prefix".indel.vcf.gz
+if [ `zcat "$r3prefix".snp.vcf.gz| wc -l` = 0 -a `zcat "$r3prefix".indel.vcf.gz| wc -l` = 0 ]; then
+ echo low coverage
+ exit
+elif [ `zcat "$r3prefix".snp.vcf.gz| wc -l` != 0 ]; then
+ bcftools concat -a  "$r3prefix".snp.vcf.gz | bcftools sort -Oz -o  "$r3prefix".vcf.gz
+elif [ `zcat "$r3prefix".indel.vcf.gz| wc -l` != 0 ]; then
+ bcftools concat -a  "$r3prefix".indel.vcf.gz | bcftools sort -Oz -o  "$r3prefix".vcf.gz
+else
+ bcftools concat -a  "$r3prefix".snp.vcf.gz  "$r3prefix".indel.vcf.gz  | bcftools sort -Oz -o  "$r3prefix".vcf.gz
+fi
+bcftools index -t  "$r3prefix".vcf.gz
+bcftools view -i "DP>=$opt_d" -Oz -o  "$r3prefix".dp.vcf.gz  "$r3prefix".vcf.gz
+bcftools index -t  "$r3prefix".dp.vcf.gz
+mkdir -p  "$r3prefix"-haplotypes-fastq
+haplotype_from_vcf_bam.py --vcf  "$r3prefix".dp.vcf.gz --bam  "$r3prefix".bam --ref  "$r3prefix".fa --min-freq 0.10 --output  "$r3prefix"-haplotypes.tsv --fastq-prefix  "$r3prefix"-haplotypes-fastq/hap --fasta-output  "$r3prefix"-haplotypes.fasta --min-total-reads "$opt_d" --debug || true
+if [ -e "$r3prefix"-haplotypes.fasta ]; then
+ mkdir -p "$r3prefix"-haplotypes
+ seqkit fx2tab "$r3prefix"-haplotypes.fasta|awk -F'\t' -v dir="$r3prefix"-haplotypes '{print ">"$1"reads\n"$2 > dir"/"$1"reads.fasta"}'
+ for x in "$r3prefix"-haplotypes/*.fasta; do
+  #x="$r3prefix"-haplotypes/xxxx.fasta
+  y="$(echo "$x"|sed 's%-haplotypes/%-haplotypes-fastq/hap.%; s/reads[.]fasta/.fastq/')" #"$r3prefix"-haplotypes-fastq/hap.xxxx.fastq
+  cat "$y"|sed 's/\t/ /g'|seqkit fx2tab | awk -F'\t' '{print ">"$1"\n"$2}' > "$y".fa
+  head -n $((10#$opt_n*2)) "$y".fa > "$y".fa.sub #10#は10進数という意味 030のように0から始まると8進数扱いになるのを避けるため
+  mafft $opt_f --thread $N_CPU --auto "$y".fa.sub > "$y".fa.sub.mafft
+  extract_consensus.py "$y".fa.sub.mafft > "$y".sub.mafft.fq
+  (echo "@$(basename "$x" .fasta)"; tail -n+2 "$y".sub.mafft.fq) > output-consensus-fastq/"$(basename "$x" .fasta)".fq
+  (echo ">haplotype_$(basename "$x")"; tail -n+2 "$x"; head -n $((10#$opt_n*2)) "$y".fa) > "$y".fa.sub
+  mafft $opt_f --thread $N_CPU --auto "$y".fa.sub > "$y".fa.sub.mafft
+  cp -p "$y".fa.sub.mafft output-consensus-alignments/"$(basename "$x")".mafft
+ done
+ #cp -p "$r3prefix"-haplotypes/*.fasta output-consensus-fasta/
+fi
+#cp -p "$r3prefix"/*.fasta output-consensus-fasta/
+
+EOF
+
+fq=()
+while IFS= read -r pp_line; do fq+=("$pp_line"); done < <(find "$input_1/" | grep -E "[.](fastq|fq)($|[.]gz$)")
+for i in ${fq[@]+"${fq[@]}"}; do
+ workdir="work/$(basename "$i").dir"
+ mkdir -p "$workdir"/round2 "$workdir"/round2-fastq
+ if [ "$(ls "$workdir"/round1)" ]; then
+  cat "$workdir"/round1/*.fasta > "$workdir"/round1/all.fa
+  echo "$ENV_MAFFT bash run-consensus3.sh $(pp_shell_quote "$workdir/round1/all.fa") $opt_j $N_CPU $(pp_shell_quote "$workdir") $(pp_shell_quote "$i") '$opt_v' '$opt_d' '$opt_f' '$opt_n'"
+ fi
+done | DOPARALLEL
+
+WAITPARALLEL
+
+#全サンプルの代表配列をさらにクラスタリングし、最大リード数のクラスターIDに付け替える
+#opt_l #0.99
+consfq=()
+while IFS= read -r pp_line; do consfq+=("$pp_line"); done < <(find output-consensus-fastq/|grep "[.]fq$" || true)
+if [ ${#consfq[@]} = 0 ]; then echo "No consensus fastq file was generated"; false; fi
+cat -- ${consfq[@]+"${consfq[@]}"} > output-consensus.fastq
+DO_SEQKIT seqkit fq2fa output-consensus.fastq > output-consensus.fasta
+DO_SEQKIT seqkit sort -lr output-consensus.fasta > output-all.sorted.fasta
+DO_CDHIT cd-hit -i output-all.sorted.fasta -c "$opt_l" -T $N_CPU -o output-all-center.fasta -M 0 -d 0
+DO_MAFFT awk '{if($0~"^>"){id=$2+1}else{a=substr($3,2,length($3)-4); n=split(a,arr,"_"); b=arr[n]; sub(/reads/,"",b); print a"\t"id"\t"b}}' output-all-center.fasta.clstr|sort -k2,2n -k3,3nr > output-all-center.fasta.clstr.uc
+DO_SEQKIT seqkit fx2tab output-all.sorted.fasta |awk 'FILENAME==ARGV[1]{seq[$1]=$2} FILENAME==ARGV[2]{if(a[$2]==0){a[$2]=$3; print ">"$1"\n"seq[$1]}}' /dev/stdin output-all-center.fasta.clstr.uc > output-all-clusters.max.uc.fasta
+
+DO_MAFFT mafft $opt_f --thread $N_CPU --auto output-all-clusters.max.uc.fasta > output-all-clusters.max.uc.fasta.mafft
+
+cat << 'EOF' > run-blast.sh
+#!/bin/bash
+set -eux
+set -o pipefail
+
+j="$1"
+opt_a="$2" #0.90
+N_CPU="$3"
+opt_b="$4" #200
+
+#同じbitscoreならカバー率の高い（＝subject長の短い）ヒットを集計し、同一bitscore&カバー率のヒットがあればヒット数で割ってカウントする
+seqkit fq2fa "$j" | blastn -db output-all-clusters.max.uc.fasta -query /dev/stdin -num_threads "$N_CPU" -outfmt "6 qseqid sseqid qlen slen pident length mismatch gapopen qstart qend sstart send evalue bitscore staxids stitle"  | awk -F'\t' '{if($1!=old){print $0; old=$1; olds=$14}else if($1==old&&$14==olds){print $0}}' > "$j".blastn
+cat "$j".blastn | awk -F'\t' -v opt_b="$opt_b" -v opt_a="$opt_a" -v name="$(basename "$j" | sed 's/[.]gz$//; s/[.]\(fastq\|fq\)$//')" '
+  function calcdata(  i){PROCINFO["sorted_in"]="@ind_num_asc"; for(j in s){for(i in data[j]){cnt[data[j][i]]+=1/s[j]}; break}; delete data; delete s; n=0}
+  $14>=opt_b&&$5>=opt_a*100{if($1!=old){old=$1; olds=$14; if(n>0){calcdata()}}; if($14==olds){data[$4][s[$4]]=$2; s[$4]++; n++}}
+  END{if(n>0){calcdata()}; print "id\t"name; for(i in cnt){print i"\t"cnt[i]}}
+ ' > "$j".blastn.cnt #work-blast/`basename $j`.cnt
+
+EOF
+
+DO_BLAST makeblastdb -in output-all-clusters.max.uc.fasta -dbtype nucl
+mkdir -p work-blast
+
+fq=()
+while IFS= read -r pp_line; do fq+=("$pp_line"); done < <(find "$input_1/" | grep -E "[.](fastq|fq)($|[.]gz$)")
+for i in ${fq[@]+"${fq[@]}"}; do
+ echo "$ENV_SEQKIT seqkit split2 -s $opt_s -O $(pp_shell_quote "tmp-fastq-split/$(basename "$i")") $(pp_shell_quote "$i")"
+done | DOPARALLELONE
+
+WAITPARALLEL
+
+fq=()
+while IFS= read -r pp_line; do fq+=("$pp_line"); done < <(find "$input_1/" | grep -E "[.](fastq|fq)($|[.]gz$)")
+for i in ${fq[@]+"${fq[@]}"}; do
+ fqsplit=()
+ while IFS= read -r pp_line; do fqsplit+=("$pp_line"); done < <(find "tmp-fastq-split/$(basename "$i")"/ | grep -E "[.](fastq|fq)($|[.]gz$)")
+ for j in ${fqsplit[@]+"${fqsplit[@]}"}; do
+  echo "$ENV_BLAST bash run-blast.sh $(pp_shell_quote "$j") $opt_a 1 '$opt_b'"
+ done
+done | DOPARALLELONE
+
+WAITPARALLEL
+
+fq=()
+while IFS= read -r pp_line; do fq+=("$pp_line"); done < <(find "$input_1/" | grep -E "[.](fastq|fq)($|[.]gz$)")
+for i in ${fq[@]+"${fq[@]}"}; do
+ #入力ファイル名がカウント表（all.cnt*.txt / xlsx）の列見出し＝サンプル名になるので識別子として畳む
+ (echo -e "id\t$(pp_safe_name "$(basename "$i" | sed 's/[.]gz$//; s/[.]\(fastq\|fq\)$//')")"
+ awk -F'\t' 'FNR>1{cnt[$1]+=$2} END{PROCINFO["sorted_in"]="@val_num_desc"; for(i in cnt){print i"\t"cnt[i]}}' "tmp-fastq-split/$(basename "$i")"/*.blastn.cnt) > "work-blast/$(basename "$i").cnt"
+done
+
+DO_MAFFT awk -F'\t' '
+ {if(FNR==1){name[FILENAME]=$2}else{data[FILENAME][$1]=$2; cnt[$1]+=$2}}
+ END{
+  ORS=""
+  PROCINFO["sorted_in"]="@ind_str_asc"
+  print "id"
+  for(j in name){
+   print "\t"name[j]
+  }
+  print "\n"
+  PROCINFO["sorted_in"]="@val_num_desc"
+  for(i in cnt){
+   print i
+   PROCINFO["sorted_in"]="@ind_str_asc"
+   for(j in name){
+    print "\t"data[j][i]+0
+   }
+   print "\n"
+  }
+ }' work-blast/*.cnt > all.cnt.txt
+
+DO_SEQKIT seqkit fx2tab output-all.sorted.fasta | DO_MAFFT awk -F'\t' '
+ FILENAME==ARGV[1]{seq[$1]=$2}
+ FILENAME==ARGV[2]{if(FNR==1){OFS="\t"; $1=$1"\tseq"}else{$1=$1"\t"seq[$1]}; print $0}' /dev/stdin all.cnt.txt  > all.cnt.seq.txt
+
+DO_SEQKIT seqkit fx2tab output-consensus.fastq | DO_MAFFT awk -F'\t' '
+ FILENAME==ARGV[1]{seq[$1]=$2; qual[$1]=$3}
+ FILENAME==ARGV[2]{if(FNR==1){OFS="\t"; $1=$1"\tseq\tqual"}else{$1=$1"\t"seq[$1]"\t"qual[$1]}; print $0}' /dev/stdin all.cnt.txt  > all.cnt.seq.qual.txt
+
+DO_EXCEL java -jar /usr/local/bin/excel2.jar all.cnt.seq.qual.txt all.cnt.seq.qual.xlsx
+DO_KYST node /usr/local/bin/generate-output-consensus-viewer.mjs output-consensus-alignments
+
+post_processing
+
+#<option detail>
+#<opt_v>
+ Parameters (most searching options also apply)
+  --cons_truncate             do not ignore terminal gaps in MSA for consensus
+  --id REAL                   reject if identity lower, accepted values: 0-1.0
+  --iddef INT                 id definition, 0-4=CD-HIT,all,int,MBL,BLAST (2)
+  --qmask none|dust|soft      mask seqs with dust, soft or no method (dust)
+  --sizein                    propagate abundance annotation from input
+  --strand plus|both          cluster using plus or both strands (plus)
+  --usersort                  indicate sequences not pre-sorted by length
+  --minsize INT               minimum abundance (unoise only) (8)
+  --unoise_alpha REAL         alpha parameter (unoise only) (2.0)
+#</opt_v>
+#<opt_f>
+By default, the sequences are re-ordered according to similarity.  To keep the input order,
+% mafft-sparsecore.rb -i in -o inputorder > out
+If the input data contains reverse complementary sequences (nucleotide only),
+
+% mafft-sparsecore.rb -i in -D '--adjustdirection' > out
+To specify the seed of random numbers,
+
+% mafft-sparsecore.rb -i in -s seed > out
+seed=0 by default.
+#</opt_f>
+#</option detail>

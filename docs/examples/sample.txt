@@ -1,0 +1,2 @@
+nap_demo_A	nap_demo_A_F	nap_demo_A_R	430	530
+nap_demo_B	nap_demo_B_F	nap_demo_B_R	430	530
