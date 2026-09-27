@@ -1,8 +1,9 @@
 import { alignMafft } from './mafft.mjs';
+import { ByteOutput } from './app/byte-output.mjs';
+import { isMemoryAllocationError } from './app/memory.mjs';
 const commands = new Set(['vsearch', 'cd-hit', 'cd-hit-est', 'minimap2', 'samtools', 'blastn', 'makeblastdb',
   ...['tbfast','disttbfast','dvtditr','pairlocalalign','dndpre','makedirectionlist','setdirection','f2cl','countlen'].map(name => 'mafft-' + name)]);
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
 
 function safePath(name) {
   if (typeof name !== 'string' || !name || name.includes('\0') || name.includes('\\') || name.startsWith('/') || name.split('/').some(p => p === '..' || p === '.')) {
@@ -48,7 +49,7 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
   const url = new URL(`${directory}${tool}.mjs`, import.meta.url);
   const { default: createTool } = await import(url.href);
   const input = typeof stdin === 'string' ? encoder.encode(stdin) : stdin;
-  const stdout = [], stderr = [];
+  const stdout = new ByteOutput(), stderr = new ByteOutput();
   let inputIndex = 0;
   let instance;
   try {
@@ -69,8 +70,8 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
           module.FS.mkdirTree(file.slice(0, file.lastIndexOf('/')));
           module.FS.writeFile(file, typeof content === 'string' ? encoder.encode(content) : content);
         }
-      }], print: line => stdout.push(...encoder.encode(line + '\n')),
-      printErr: line => stderr.push(...encoder.encode(line + '\n')) });
+      }], print: line => stdout.write(encoder.encode(line + '\n')),
+      printErr: line => stderr.write(encoder.encode(line + '\n')) });
     let exitCode = 0;
     try { exitCode = instance.callMain(checkedArgs) ?? 0; }
     catch (error) {
@@ -91,7 +92,7 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
       const file = safePath(name);
       if (instance.FS.analyzePath(file).exists) resultFiles[name] = instance.FS.readFile(file).slice();
     }
-    return { exitCode, stdout: decoder.decode(Uint8Array.from(stdout)), stderr: decoder.decode(Uint8Array.from(stderr)), files: resultFiles };
+    return { exitCode, stdout: stdout.text(), stderr: stderr.text(), files: resultFiles };
   } finally { instance?.PThread?.terminateAllThreads(); }
 }
 self.onmessage = async ({ data }) => {
@@ -101,5 +102,6 @@ self.onmessage = async ({ data }) => {
       ? await alignMafft(options.stdin, args, callTool, (command, detail) => self.postMessage({ progress: detail || command }))
       : await callTool(tool, args, options);
     self.postMessage({ result });
-  } catch (error) { self.postMessage({ error: error.stack || error.message || String(error) }); }
+  } catch (error) { self.postMessage({ error: error.stack || error.message || String(error), ...(isMemoryAllocationError(error) ? { code: 'WASM_MEMORY' } : {}) }); }
+  finally { self.close(); }
 };

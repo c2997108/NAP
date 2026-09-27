@@ -1,10 +1,12 @@
 import { ConsensusTools } from '../tool-client.mjs';
-import { readFastq,fasta,fastq,parseFasta,parseUc,consensus,decode,sampleName,safeName,compare } from './sequence.mjs';
+import { readFastq,streamFastq,fasta,fastq,parseFasta,parseUc,consensus,decode,sampleName,safeName,compare } from './sequence.mjs';
 import { qualityClusters } from './qcluster.mjs';
 import { callVariants,vcf } from './variants.mjs';
 import { haplotypes } from './haplotype.mjs';
 import { mapParallel } from './parallel.mjs';
 import { ConsensusProgress } from './progress.mjs';
+import { ConsensusSamples } from './sample-client.mjs';
+import { toolScope } from './tool-scope.mjs';
 export const defaults={firstIdentity:.97,minReads:3,maxReads:30,secondIdentity:.99,allIdentity:1,blastIdentity:.9,minBitscore:200,minDepth:30,batchSize:300,parallelSamples:8,strand:'plus',adjustDirection:false,haplotypes:true};
 export function validateOptions(options={}) {
   const o={...defaults,...options};
@@ -35,56 +37,10 @@ export function blastCounts(text,{blastIdentity=.9,minBitscore=200}={}) {
   return {counts,assigned};
 }
 export class ConsensusPipeline {
-  constructor({tools=new ConsensusTools(),onProgress=()=>{}}={}) {this.tools=tools;this.onProgress=onProgress;}
-  async run(inputFiles,options={},signal) {
-    const o=validateOptions(options),samples=[],entries=[];
-    const started=new Date().toISOString(); let commands=0, ties=0;
-    let parallel, tracker;
-    const concurrency={limit:Math.min(o.parallelSamples,inputFiles?.length||0),samplePeak:0,blastPeak:0};
-    // Each sample owns its outputs and logs; merge in input order after the
-    // barrier so worker completion order never changes consensus selection.
-    const scope=(label='',signal)=>{
-      const files=new Map(),logs=[],warnings=[];
-      const save=(name,data)=>files.set(name,new Blob([data]));
-      const emit=message=>{signal?.throwIfAborted();this.onProgress({message:label?`[${label}] ${message}`:message,commands,parallel,...tracker?.snapshot()});};
-      const warn=message=>{warnings.push(message);emit(message);};
-      const run=async(tool,args,settings={})=>{
-        signal?.throwIfAborted(); commands++; emit(`${tool}: ${args.slice(0,5).join(' ')}`);
-        const result=await this.tools.run(tool,args,{...settings,signal});
-        logs.push(`${label?`[${label}] `:''}$ ${tool} ${args.join(' ')}\n${result.stderr}\n`);
-        if(result.exitCode) throw new Error(`${label?`${label}: `:''}${tool} が終了コード ${result.exitCode} で失敗しました。\n${result.stderr.slice(-4000)}`);
-        return result;
-      };
-      const align=async(records,onProgress=()=>{})=>{
-        signal?.throwIfAborted();commands++;emit(`MAFFT: ${records.length} 配列をアラインメント`);
-        const result=await this.tools.align(fasta(records),{args:[...(o.adjustDirection?['--adjustdirection']:[]),'--auto'],signal,onProgress:step=>{
-          if(typeof step.fraction==='number') {onProgress(step);emit(`MAFFT ${step.command}: ${step.completedSteps} / ${step.totalSteps??'?'} 段階完了`);}
-        }});
-        logs.push(`${label?`[${label}] `:''}$ mafft --auto (${records.length} sequences)\n${result.stderr}\n`);
-        if(result.exitCode) throw new Error(`${label?`${label}: `:''}MAFFT に失敗しました。`);
-        return result.stdout;
-      };
-      return {files,logs,warnings,save,emit,warn,run,align};
-    };
-    const global=scope('',signal),{files,logs,warnings,save,emit,run,align}=global;
-    const merge=local=>{for(const [name,data] of local.files) files.set(name,data);logs.push(...local.logs);warnings.push(...local.warnings);};
-    if(!inputFiles?.length) throw new Error('FASTQ ファイルを選択してください。');
-    const usedNames=new Set();
-    const jobs=Array.from(inputFiles,(file,sampleIndex)=>{
-      let name=safeName(sampleName(file.name)) || `sample${sampleIndex+1}`,base=name,counter=2;
-      while(usedNames.has(name)) name=`${base}_${counter++}`; usedNames.add(name);
-      return {file,name};
-    });
-    tracker=new ConsensusProgress(jobs);
-    const progress=(phase,list,metric)=>state=>{
-      parallel={phase,activeSamples:state.active.map(i=>list[i].name),completed:state.completed,total:state.total,limit:state.limit};
-      concurrency[metric]=Math.max(concurrency[metric],state.active.length);
-      emit(`${phase}: ${state.completed} / ${state.total} サンプル完了（同時実行上限 ${state.limit}）`);
-    };
-    emit(`${jobs.length} FASTQ を最大 ${concurrency.limit} サンプルずつ並列実行`);
-    const processed=await mapParallel(jobs,o.parallelSamples,async({file,name},sampleIndex,signal)=>{
-      const local=scope(name,signal),{save,emit,warn,run,align}=local,entries=[];
-      const step=(stage,fraction,detail='',extra={})=>{tracker.update(name,stage,fraction,detail,extra);emit(`${file.name}: ${detail}`);};
+  constructor({tools=new ConsensusTools(),sampleJobs=new ConsensusSamples(),onProgress=()=>{}}={}) {this.tools=tools;this.sampleJobs=sampleJobs;this.onProgress=onProgress;}
+  async analyseSample({file,name},o,signal,onProgress=()=>{}) {
+      const local=toolScope(this.tools,{label:name,signal,options:o,onProgress,onCommand:()=>onProgress({command:true})}),{save,emit,warn,run,align}=local,entries=[];
+      const step=(stage,fraction,detail='',extra={})=>onProgress({step:{stage,fraction,detail,extra},message:`[${name}] ${file.name}: ${detail}`});
       let ties=0;
       step('reading',0,'FASTQを読み込み');
       const reads=await readFastq(file,{signal,onProgress:p=>step('reading',p.fraction,`${p.reads.toLocaleString()} reads 読み込み`)});
@@ -106,7 +62,7 @@ export class ConsensusPipeline {
       }
       sample.round1=clusters.length;
       step('clustering',1,`${clusters.length} クラスターを検出`,{totalClusters:clusters.length});
-      if(!clusters.length) {warn(`${file.name}: ${o.minReads} reads 以上のクラスターがありません。BLAST 集計には使用します。`);step('analysed',1,'サンプル解析完了・BLAST待ち');sample.input=reads;return {local,sample,entries,ties};}
+      if(!clusters.length) {warn(`${file.name}: ${o.minReads} reads 以上のクラスターがありません。BLAST 集計には使用します。`);step('analysed',1,'サンプル解析完了・BLAST待ち');return {local:{files:local.files,logs:local.logs,warnings:local.warnings},sample,entries,ties};}
       // File glob ordering in the shell determines round1 input order.
       clusters.sort((a,b)=>compare(`cluster${a.id}_${a.members.length}reads`,`cluster${b.id}_${b.members.length}reads`));
       const first=[];
@@ -181,9 +137,62 @@ export class ConsensusPipeline {
         }
       }
       step('analysed',1,'サンプル解析完了・BLAST待ち');
-      sample.input=reads;
-      return {local,sample,entries,ties};
-    },{signal,onState:progress('サンプル解析',jobs,'samplePeak')});
+
+      return {local:{files:local.files,logs:local.logs,warnings:local.warnings},sample,entries,ties};
+  }
+  async searchSample({file,name,sample,dbFiles},o,signal,onProgress=()=>{}) {
+    const local=toolScope(this.tools,{label:name,signal,options:o,onProgress,onCommand:()=>onProgress({command:true})}),{save,run}=local;
+    const counts=new Map();let batch=[],completed=0,part=0;
+    const flush=async()=>{
+      if(!batch.length)return;
+      const end=completed+batch.length;
+      onProgress({message: name+': BLAST '+(completed+1)+'〜'+end+' / '+sample.reads+' reads'});
+      const result=await run('blastn',['-db','db','-query','query.fa','-num_threads','1','-outfmt','6 qseqid sseqid qlen slen pident length mismatch gapopen qstart qend sstart send evalue bitscore staxids stitle'],{files:{...dbFiles,'query.fa':fasta(batch)}});
+      save('work-blast/'+name+'/part'+String(++part).padStart(4,'0')+'.blastn',result.stdout);
+      const assignment=blastCounts(result.stdout,o);sample.assigned+=assignment.assigned;
+      for(const [id,count] of assignment.counts)counts.set(id,(counts.get(id)||0)+count);
+      completed=end;batch=[];
+      onProgress({step:{stage:'blast',fraction:completed/sample.reads,detail:completed+'/'+sample.reads+' reads 処理済み',extra:{processedReads:completed}},message:name+': BLAST '+completed+'/'+sample.reads+' reads 完了'});
+    };
+    onProgress({step:{stage:'blast',fraction:0,detail:'BLAST用にFASTQを再読込',extra:{processedReads:0}},message:name+': BLAST用にFASTQを再読込'});
+    for await(const record of streamFastq(file,{signal})){batch.push(record);if(batch.length===o.batchSize)await flush();}
+    await flush();
+    if(completed!==sample.reads)throw Error(file.name+': 再読込時のリード数が変化しました。');
+    save('work-blast/'+name+'.cnt','id\t'+name+'\n'+[...counts].sort((a,b)=>b[1]-a[1] || compare(a[0],b[0])).map(([id,n])=>id+'\t'+n+'\n').join(''));
+    return {local:{files:local.files,logs:local.logs,warnings:local.warnings},sample,counts};
+  }
+  async run(inputFiles,options={},signal) {
+    const o=validateOptions(options),samples=[],entries=[];
+    const started=new Date().toISOString(); let commands=0, ties=0;
+    let parallel, tracker;
+    const concurrency={limit:Math.min(o.parallelSamples,inputFiles?.length||0),samplePeak:0,blastPeak:0};
+    // Each sample owns its outputs and logs; merge in input order after the
+    // barrier so worker completion order never changes consensus selection.
+    const scope=(label='',signal)=>toolScope(this.tools,{label,signal,options:o,onCommand:()=>{commands++;},onProgress:p=>this.onProgress({...p,commands,parallel,...tracker?.snapshot()})});
+    const global=scope('',signal),{files,logs,warnings,save,emit,run,align}=global;
+    const merge=local=>{for(const [name,data] of local.files) files.set(name,data);logs.push(...local.logs);warnings.push(...local.warnings);};
+    if(!inputFiles?.length) throw new Error('FASTQ ファイルを選択してください。');
+    const usedNames=new Set();
+    const jobs=Array.from(inputFiles,(file,sampleIndex)=>{
+      let name=safeName(sampleName(file.name)) || `sample${sampleIndex+1}`,base=name,counter=2;
+      while(usedNames.has(name)) name=`${base}_${counter++}`; usedNames.add(name);
+      return {file,name};
+    });
+    tracker=new ConsensusProgress(jobs);
+    const progress=(phase,list,metric)=>state=>{
+      parallel={phase,activeSamples:state.active.map(i=>list[i].name),completed:state.completed,total:state.total,limit:state.limit,requestedLimit:state.requestedLimit,memoryRetries:state.memoryRetries};
+      concurrency[metric]=Math.max(concurrency[metric],state.active.length);
+      emit(`${phase}: ${state.completed} / ${state.total} サンプル完了（同時実行上限 ${state.limit}）`);
+    };
+    const budget={limit:o.parallelSamples,memoryRetries:0};
+    const sampleProgress=(name,p)=>{if(p.command)commands++;if(p.step){const {stage,fraction,detail,extra}=p.step;tracker.update(name,stage,fraction,detail,extra);}if(p.message)emit(p.message);};
+    const poolOptions=(phase,list,metric)=>({signal,budget,priority:job=>job.file.size,onState:progress(phase,list,metric),onMemoryPressure:p=>{
+      concurrency.memoryRetries=budget.memoryRetries;concurrency.effectiveLimit=p.limit;
+      const message=`メモリー不足: 同時処理上限 ${p.previous} → ${p.limit}。${list[p.index].name} を再試行します。`;
+      warnings.push(message);emit(message);
+    }});
+    emit(`${jobs.length} FASTQ を最大 ${concurrency.limit} サンプルずつ並列実行`);
+    const processed=await mapParallel(jobs,o.parallelSamples,(job,index,signal)=>this.sampleJobs.run('analysis',{job,options:o},{signal,onProgress:p=>sampleProgress(job.name,p)}),poolOptions('サンプル解析',jobs,'samplePeak'));
     parallel=undefined;
     for(const result of processed) {merge(result.local);samples.push(result.sample);entries.push(...result.entries);ties+=result.ties;}
     if(!entries.length) throw new Error('コンセンサスが生成されませんでした。クラスターの最小リード数・同一率を確認してください。');
@@ -212,26 +221,11 @@ export class ConsensusPipeline {
     if(!Object.keys(dbFiles).length) throw new Error('BLAST データベースが生成されませんでした。');
     tracker.setGlobal('BLAST集計',1);emit('BLASTデータベース生成完了');
     const sampleCounts=new Map(),totals=new Map();
-    const searched=await mapParallel(samples,o.parallelSamples,async(sample,index,signal)=>{
-      const local=scope(sample.name,signal),{save,emit,run}=local;
-      const counts=new Map(),reads=sample.input; delete sample.input;
-      for(let start=0;start<reads.length;start+=o.batchSize) {
-        tracker.update(sample.name,'blast',start/reads.length,`${start}/${reads.length} reads 処理済み`,{processedReads:start});
-        emit(`${sample.name}: BLAST ${start+1}〜${Math.min(start+o.batchSize,reads.length)} / ${reads.length} reads`);
-        const result=await run('blastn',['-db','db','-query','query.fa','-num_threads','1','-outfmt','6 qseqid sseqid qlen slen pident length mismatch gapopen qstart qend sstart send evalue bitscore staxids stitle'],{files:{...dbFiles,'query.fa':fasta(reads.slice(start,start+o.batchSize))}});
-        save(`work-blast/${sample.name}/part${String(Math.floor(start/o.batchSize)+1).padStart(4,'0')}.blastn`,result.stdout);
-        const assignment=blastCounts(result.stdout,o); sample.assigned+=assignment.assigned;
-        for(const [id,count] of assignment.counts) counts.set(id,(counts.get(id)||0)+count);
-        const completed=Math.min(start+o.batchSize,reads.length);
-        tracker.update(sample.name,'blast',completed/reads.length,`${completed}/${reads.length} reads 処理済み`,{processedReads:completed});
-        emit(`${sample.name}: BLAST ${completed}/${reads.length} reads 完了`);
-      }
-      save(`work-blast/${sample.name}.cnt`,`id\t${sample.name}\n`+[...counts].sort((a,b)=>b[1]-a[1] || compare(a[0],b[0])).map(([id,n])=>`${id}\t${n}\n`).join(''));
-      return {local,sample,counts};
-    },{signal,onState:progress('BLAST 集計',samples,'blastPeak')});
+    const blastJobs=samples.map((sample,index)=>({...jobs[index],sample,dbFiles}));
+    const searched=await mapParallel(blastJobs,o.parallelSamples,(job,index,signal)=>this.sampleJobs.run('blast',{job,options:o},{signal,onProgress:p=>sampleProgress(job.name,p)}),poolOptions('BLAST 集計',blastJobs,'blastPeak'));
     parallel=undefined;
     for(const result of searched) {
-      merge(result.local);sampleCounts.set(result.sample.name,result.counts);
+      merge(result.local);Object.assign(samples.find(s=>s.name===result.sample.name),result.sample);sampleCounts.set(result.sample.name,result.counts);
       for(const [id,count] of result.counts) totals.set(id,(totals.get(id)||0)+count);
     }
     const names=samples.map(s=>s.name).sort(compare);
@@ -239,6 +233,7 @@ export class ConsensusPipeline {
     save('all.cnt.txt','id\t'+names.join('\t')+'\n'+rows.map(r=>[r.id,...r.counts].join('\t')+'\n').join(''));
     save('all.cnt.seq.txt','id\tseq\t'+names.join('\t')+'\n'+rows.map(r=>[r.id,r.seq,...r.counts].join('\t')+'\n').join(''));
     save('all.cnt.seq.qual.txt','id\tseq\tqual\t'+names.join('\t')+'\n'+rows.map(r=>[r.id,r.seq,r.qual,...r.counts].join('\t')+'\n').join(''));
+    concurrency.effectiveLimit=Math.min(budget.limit,inputFiles.length);concurrency.memoryRetries=budget.memoryRetries;
     const manifest={started,finished:new Date().toISOString(),options:o,concurrency,samples,commands,consensuses:entries.length,representatives:representatives.length,consensusTiedColumns:ties,warnings,
       versions:{mafft:'7.525',vsearch:'2.29.3','cd-hit':'4.8.1',minimap2:'2.28',samtools:'1.17',htslib:'1.17',varscan:'2.4.6 JavaScript port',blastn:'2.16.0+'},
       upstream:'https://github.com/c2997108/OpenPortablePipeline/blob/53c159aeedff6038f0fe5ab032bdd4f064067483/PortablePipeline/scripts/nanopore~get-consensus',

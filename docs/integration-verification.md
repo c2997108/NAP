@@ -65,9 +65,25 @@ Minimum and maximum lengths start blank. With all four sample cells blank, the e
 
 The browser test generates input files after renaming primers, with two sample definitions (including maximum length 0). These table inputs produce 12 assigned sequences using actual BLAST WASM, six per sample, followed by two consensus representatives. The editor is locked during processing. Main tab changes retain draft inputs, and desktop/mobile views fit their viewport. Reports and screenshots are generated as `test-results/definition-editor-*`, `primer.fasta` and `sample.txt`. Model tests cover serialization, validation and stable pair identity.
 
+## Consensus parallelism and memory verification (2026-09-28)
+
+The consensus pipeline now runs FASTQ parsing, quality-bin preparation, tool calls and result parsing in a separate Worker for each active sample. Completed samples return outputs and summary data without retaining decoded input reads. BLAST rereads the source FASTQ in batches. Tool stdout/stderr uses fixed byte chunks instead of JavaScript number arrays. Screen updates are coalesced and only changed progress cells are updated.
+
+Actual WASM regression checks cover:
+
+- Eight synthetic FASTQs, each with three 400-base reads: serial and eight-sample parallel execution have identical consensus sequences, qualities and counts. On Windows Chrome 152.0.7977.84, the measured times were approximately 6.5 and 2.3 seconds. These tiny inputs validate concurrency and result identity; the timing does not predict arbitrary experimental-data performance.
+- Four quality-tagged inputs: quality-bin clustering gives identical serial and parallel results.
+- A comparison with the original pipeline implementation at `a1947ce`, using the same tools and helper modules: all 91 non-log output artifacts match byte-for-byte with haplotype processing enabled. Consensus data and read counts also match.
+- The actual application UI processes 300 synthetic FASTQs at a requested concurrency of 16: 900 input reads, 300 sample consensuses, two representatives, three assigned reads per sample, and final progress at 100%. Each file contains only three reads; this is not a large-input memory-capacity guarantee.
+- The VSEARCH factory is made to throw the reported `RangeError: WebAssembly.Memory(): could not allocate memory` in test-only HTTP responses. The scheduler lowers its concurrency, drains already-running jobs, retries failed samples, retains the lower limit for BLAST, and preserves sequences and counts. Persistent single-job failure stops after bounded retries with actionable guidance. This simulates allocation failure without intentionally exhausting system RAM.
+
+Test-only shared counters inspect Worker ownership before result/error delivery. They check that every constructed sample/tool/pthread Worker receives a termination call and that a reporting Worker owns no unfinished child Workers. Application Workers also close themselves after their single job. Chrome can retain DevTools target metadata for terminated Workers, so that inventory is not used to infer a leak.
+
+Run `npm run test:consensus-memory`; its ignored report is `test-results/consensus-memory-report.json`. The 28 Node regression tests, split-to-consensus integration, definition editor, headerless Pages simulation and package checks also pass. This change preserves tool arguments, immutable WASM binaries and the two-GiB-per-instance limit. Output Blobs remain in memory, and a single oversized job or excessive total output can still exceed available browser memory.
+
 ## Packaging checks
 
-All shipped tool files, the corresponding-source archive, vendor code and fixed upstream scripts passed SHA-256 checks. Shared BLAST copies and both manifests agree. Relative module, Worker, CSS and HTML references are present with case-sensitive names. The GitHub Pages copy in `docs/` includes all 100 `public/` assets, `.nojekyll`, and license notices. Package checks verify that every published asset matches its development source. The package is approximately 193.6 MiB including both copies, excluding dependencies, build and test output; each site's assets occupy approximately 96.7 MiB. Its largest file is the 69,797,999-byte corresponding-source archive.
+All shipped tool files, the corresponding-source archive, vendor code and fixed upstream scripts passed SHA-256 checks. Shared BLAST copies and both manifests agree. Relative module, Worker, CSS and HTML references are present with case-sensitive names. The GitHub Pages copy in `docs/` includes all 105 `public/` assets, `.nojekyll`, and license notices. Package checks verify that every published asset matches its development source. The package is approximately 193.6 MiB including both copies, excluding dependencies, build and test output; each site's assets occupy approximately 96.7 MiB. Its largest file is the 69,797,999-byte corresponding-source archive.
 
 `npm run prepare:pages` refreshes the branch-published files before commit/push. `npm run test:pages` serves the actual `docs/` folder without isolation headers under a repository subpath; Service Worker startup, 12-read splitting, two consensus representatives, standalone tools, and safe Worker updates pass. No GitHub Pages settings or remote deployment were changed.
 

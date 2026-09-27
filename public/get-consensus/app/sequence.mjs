@@ -22,25 +22,25 @@ export function qscore(header) {
   const m = header.match(/(?:^|\s)qs:f:([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(?=\s|$)/);
   return m ? Number(m[1]) : null;
 }
-export async function readFastq(file, {signal,onProgress = () => {}} = {}) {
+export async function* streamFastq(file, {signal,onProgress = () => {}} = {}) {
   let consumed = 0;
   let stream = file.stream().pipeThrough(new TransformStream({ transform(chunk, controller) { consumed += chunk.byteLength; controller.enqueue(chunk); } }));
   const signature = new Uint8Array(await file.slice(0,2).arrayBuffer());
   if (signature[0] === 31 && signature[1] === 139) stream = stream.pipeThrough(gzipTransform(file));
   else if (/\.gz$/i.test(file.name)) throw new Error(`${file.name}: gzip ファイルの形式が不正です。`);
   const reader = stream.pipeThrough(new TextDecoderStream('utf-8',{fatal:true})).getReader();
-  const records = [], ids = new Set(); let buffer = '', lines = [], size = 0;
+  const ids = new Set(); let buffer = '', lines = [], size = 0, count = 0;
   function line(text) {
     if (!lines.length && !text) return;
     lines.push(text.replace(/\r$/, ''));
     if (lines.length < 4) return;
     const [head,seq,plus,qual] = lines; lines = [];
     if (!head.startsWith('@') || !plus.startsWith('+') || !seq || seq.length !== qual.length || !/^[ACGTURYSWKMBDHVNacgturyswkmbdhvn]+$/.test(seq) || !/^[!-~]+$/.test(qual)) {
-      throw new Error(`${file.name}: FASTQ レコード ${records.length + 1} が不正です（配列・品質長と4行形式を確認してください）。`);
+      throw new Error(`${file.name}: FASTQ レコード ${count + 1} が不正です（配列・品質長と4行形式を確認してください）。`);
     }
     const header = head.slice(1), id = header.split(/\s/)[0];
     if (!id || ids.has(id)) throw new Error(`${file.name}: リード ID が空または重複しています: ${id}`);
-    ids.add(id); records.push({id,header,seq:seq.toUpperCase(),qual,q:qscore(header)});
+    ids.add(id); count++; return {id,header,seq:seq.toUpperCase(),qual,q:qscore(header)};
   }
   try {
     for (;;) {
@@ -48,14 +48,18 @@ export async function readFastq(file, {signal,onProgress = () => {}} = {}) {
       const {value,done} = await reader.read(); if (done) break;
       buffer += value; size += value.length;
       let start = 0, at;
-      while ((at = buffer.indexOf('\n',start)) >= 0) { line(buffer.slice(start,at)); start = at + 1; }
-      buffer = buffer.slice(start); onProgress({reads:records.length,bytes:size,consumedBytes:consumed,fraction:Math.min(.99, consumed / Math.max(1,file.size))});
+      while ((at = buffer.indexOf('\n',start)) >= 0) { signal?.throwIfAborted(); const record = line(buffer.slice(start,at)); start = at + 1; if (record) yield record; }
+      buffer = buffer.slice(start); onProgress({reads:count,bytes:size,consumedBytes:consumed,fraction:Math.min(.99, consumed / Math.max(1,file.size))});
     }
-    if (buffer) line(buffer);
+    if (buffer) { const record = line(buffer); if (record) yield record; }
     if (lines.length) throw new Error(`${file.name}: FASTQ の末尾が不完全です。`);
-    if (!records.length) throw new Error(`${file.name}: リードがありません。`);
-    return records;
+    if (!count) throw new Error(`${file.name}: リードがありません。`);
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+}
+export async function readFastq(file, options) {
+  const records = [];
+  for await (const record of streamFastq(file, options)) records.push(record);
+  return records;
 }
 function roundEven(x) { const f = Math.floor(x), d = x-f; return d === .5 ? f + f%2 : Math.round(x); }
 // extract_consensus.py: gaps compete with the most frequent base; qualities

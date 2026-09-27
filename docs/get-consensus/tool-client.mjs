@@ -15,7 +15,7 @@ export class ConsensusTools {
       worker.onmessage = ({ data }) => {
         if (data.progress) { onProgress?.(data.progress); return; }
         done();
-        if (data.error) reject(new Error(data.error));
+        if (data.error) reject(Object.assign(new Error(data.error), { code: data.code }));
         else resolve(data.result);
       };
       worker.postMessage({ tool, args, files, outputs, stdin });

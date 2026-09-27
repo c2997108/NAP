@@ -5,6 +5,7 @@ import { alignmentViewer,viewerHtml } from './viewer.mjs';
 const $=s=>document.querySelector(s),form=$('#options');
 let selected=[],worker,result,busy=false,timer,started,viewer,history=[],xlsxUrl;
 let generation=0,inputProvenance=null;
+const progressRows=new Map();
 const notifyState=()=>window.dispatchEvent(new Event('nap:consensus-state'));
 function updateProgress(progress) {
   const value=Math.max($('#consensus-progress').value,Math.min(.99,progress.fraction||0));
@@ -13,17 +14,19 @@ function updateProgress(progress) {
   $('#consensus-progress').setAttribute('aria-valuetext',$('#consensus-progress-value').textContent);
   const list=$('#consensus-file-progress');
   for(const file of progress.files||[]) {
-    let row=[...list.children].find(row=>row.dataset.sample===file.name);
-    if(!row) {
-      row=document.createElement('li');row.dataset.sample=file.name;
+    let cached=progressRows.get(file.name);
+    if(!cached) {
+      const row=document.createElement('li');row.dataset.sample=file.name;
       const label=document.createElement('span'),bar=document.createElement('progress'),detail=document.createElement('small');
       label.textContent=file.filename;bar.max=1;bar.setAttribute('aria-label',`${file.filename} の解析進捗`);row.append(label,bar,detail);list.append(row);
+      cached={bar,detail};progressRows.set(file.name,cached);
     }
-    row.querySelector('progress').value=file.fraction;
-    row.querySelector('small').textContent=`${Math.floor(file.fraction*100)}% · ${file.phase}${file.detail?' · '+file.detail:''}`;
+    if(cached.fraction!==file.fraction){cached.bar.value=file.fraction;cached.fraction=file.fraction;}
+    const text=`${Math.floor(file.fraction*100)}% · ${file.phase}${file.detail?' · '+file.detail:''}`;
+    if(cached.text!==text){cached.detail.textContent=text;cached.text=text;}
   }
 }
-function resetProgress() {$('#consensus-progress').value=0;$('#consensus-progress').setAttribute('aria-valuetext','0%');$('#consensus-progress-value').textContent='0%';$('#consensus-file-progress').replaceChildren();$('#consensus-progress-panel').hidden=true;}
+function resetProgress() {progressRows.clear();$('#consensus-progress').value=0;$('#consensus-progress').setAttribute('aria-valuetext','0%');$('#consensus-progress-value').textContent='0%';$('#consensus-file-progress').replaceChildren();$('#consensus-progress-panel').hidden=true;}
 function status(text) {$('#status').textContent=text;}
 function filesChanged() {
   $('#file-list').replaceChildren();
