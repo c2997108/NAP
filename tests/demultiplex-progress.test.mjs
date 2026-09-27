@@ -65,7 +65,9 @@ const contents=async result=>Object.fromEntries(await Promise.all(result.files.m
 test('concatenated gzip progress counts completed batches while preserving FASTQ output',async()=>{
   const input={primerText,sampleText,options:{batchSize:2},databaseReady:true};
   const plain=new File([records.join('')],'plain.fq');
-  const gzip=new File([gzipSync(records.slice(0,3).join('')),gzipSync(records.slice(3).join(''))],'input.fq.gz');
+  // One small Blob part makes EOF read-ahead deterministic across Node versions;
+  // two parts can be delivered separately even though the gzip bytes are equal.
+  const gzip=new File([Buffer.concat([gzipSync(records.slice(0,3).join('')),gzipSync(records.slice(3).join(''))])],'input.fq.gz');
   const events=[];
   const reference=await runPipeline({...input,fastqFiles:[plain]},mockBlast());
   const result=await runPipeline({...input,fastqFiles:[gzip]},mockBlast(),message=>events.push(message));
