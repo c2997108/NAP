@@ -27,6 +27,20 @@ th { color: #627580; font-weight: 500; background: #f4f7f8; }
 td, th { padding: 12px; border-bottom: 1px solid #e7edef; white-space: nowrap; }
 td:not(:first-child), th:not(:first-child) { text-align: right; }
 td button { padding: 6px 10px; }
+.sample-results-scroll { max-height: 640px; }
+#sample-results th { position: sticky; top: 0; z-index: 1; }
+#sample-results .distribution-cell { padding: 8px; text-align: left; }
+#sample-results th:nth-last-child(-n+2) { text-align: left; }
+.length-statistics { display: grid; grid-template-columns: auto auto; gap: 8px 12px; margin: 0; font-variant-numeric: tabular-nums; }
+.length-statistics dt { color: #627580; text-align: left; }
+.length-statistics dd { margin: 0; }
+.distribution-chart { display: block; width: 240px; height: auto; overflow: visible; }
+.chart-grid { stroke: #e7edef; stroke-width: 1; }
+.chart-axis { stroke: #8da0aa; stroke-width: 1; }
+.chart-tick, .chart-axis-label { fill: #627580; font-size: 11px; }
+.chart-bar { fill: #257b80; }
+.quality-chart .chart-bar { fill: #8171ac; }
+.chart-bar:hover { opacity: .7; }
 .error { color: #a05850 !important; }
 #files { max-height: 340px; }
 @media(max-width: 600px) { .toolbar { gap: 8px; } .badge { display: none; } .summary { gap: 18px; } .metric strong { font-size: 26px; } }

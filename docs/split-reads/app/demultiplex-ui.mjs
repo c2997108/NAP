@@ -1,6 +1,7 @@
 import { DemultiplexClient } from './demultiplex-client.mjs';
 import { DEFAULT_OPTIONS, prepareInputs } from './demultiplex-core.mjs';
 import { createDefinitionEditor } from './definition-editor.mjs';
+import { distributionChart } from './distribution-chart.mjs';
 const $ = id => document.getElementById(id);
 $('concurrency').value = DEFAULT_OPTIONS.concurrency;
 let fastqFiles = [], primerFile, sampleFile, busy = false, generation = 0, latest;
@@ -90,10 +91,17 @@ function showResult(result) {
   }
   const tbody = $('sample-results').querySelector('tbody'); tbody.replaceChildren();
   for (const row of s.samples) {
-    const tr = document.createElement('tr'); for (const value of [row.sample, format(row.segments), format(row.bases), `${row.minLength} / ${row.maxLength} bp`]) { const td = document.createElement('td'); td.textContent = value; tr.append(td); }
-    const td = document.createElement('td'); td.append(saveButton(`output/${row.sample}.fq`)); tr.append(td); tbody.append(tr);
+    const tr = document.createElement('tr'); for (const value of [row.sample, format(row.segments), format(row.bases)]) { const td = document.createElement('td'); td.textContent = value; tr.append(td); }
+    const lengths = document.createElement('td'), stats = document.createElement('dl'); stats.className = 'length-statistics';
+    for (const [label, value, key] of [['最短 / 最長', `${format(row.minLength)} / ${format(row.maxLength)}`, 'range'], ['平均長', row.meanLength.toLocaleString('ja-JP', { maximumFractionDigits: 2 }), 'mean'], ['中央値', row.medianLength.toLocaleString('ja-JP', { maximumFractionDigits: 2 }), 'median']]) {
+      const name = document.createElement('dt'), number = document.createElement('dd'); name.textContent = label; number.textContent = value; number.dataset.statistic = key; stats.append(name, number);
+    }
+    lengths.append(stats); tr.append(lengths);
+    const td = document.createElement('td'); td.append(saveButton(`output/${row.sample}.fq`)); tr.append(td);
+    for (const kind of ['length', 'quality']) { const chart = document.createElement('td'); chart.className = 'distribution-cell'; chart.append(distributionChart(row, kind)); tr.append(chart); }
+    tbody.append(tr);
   }
-  $('result-note').textContent = s.segments ? 'プライマーを除去し、逆向きのアンプリコンは配列を逆相補鎖、品質を逆順に補正しました。1リードから複数配列が得られる場合があります。' : '条件を満たすプライマー対がありませんでした。入力リードは unassigned.fq に保存されています。判定条件と BLAST 判定根拠を確認してください。';
+  $('result-note').textContent = s.segments ? '長さ・品質はプライマー除去後の出力配列を集計しています。平均QはFASTQ品質（Phred+33）をエラー確率に変換して平均し、Qに戻した値です。元リードの qs:f タグや sequencing_summary の値は使いません。グラフの棒にカーソルを重ねると範囲・配列数を確認できます。逆向きアンプリコンは配列を逆相補鎖、品質を逆順に補正し、1リードから複数配列が得られる場合があります。' : '条件を満たすプライマー対がありませんでした。入力リードは unassigned.fq に保存されています。判定条件と BLAST 判定根拠を確認してください。';
   $('files').replaceChildren();
   for (const file of result.files) { const li = document.createElement('li'), name = document.createElement('span'), bytes = document.createElement('small'); name.textContent = file.name; bytes.textContent = size(file.size); li.append(name, bytes, saveButton(file.name)); $('files').append(li); }
   log(`完了: ${s.completedFiles} ファイル / 最大 ${s.concurrency} ファイル同時処理 / ${s.totalReads} 入力リード → ${s.segments} 配列 / ${s.samples.length} サンプル (${(s.elapsedMs / 1000).toFixed(1)} 秒)`);

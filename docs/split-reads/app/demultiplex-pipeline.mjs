@@ -1,5 +1,6 @@
 import { prepareInputs, parseHits, assignHits, renderFastq, readFastq } from './demultiplex-core.mjs';
 import { ASSIGNMENT_HEADER, reportFiles } from './demultiplex-results.mjs';
+import { createReadDistribution, addReadDistribution, serializeReadDistribution, sampleStatistics } from './demultiplex-statistics.mjs';
 
 export { UPSTREAM_COMMIT } from './demultiplex-results.mjs';
 // A file-processing slot reuses its BLAST client. Keep a safe batch limit once
@@ -17,7 +18,7 @@ export async function runPipeline({ fastqFiles, primerText, sampleText, options,
   const started = performance.now();
   if (!fastqFiles?.length) throw new Error('FASTQ または FASTQ.gz を選択してください。');
   const prepared = inputPrepared || prepareInputs(primerText, sampleText, options);
-  const parts = new Map(), counts = new Map(), histogram = new Map();
+  const parts = new Map(), counts = new Map(), histogram = new Map(), distributions = new Map();
   const add = (name, text) => { if (!parts.has(name)) parts.set(name, []); parts.get(name).push(text); };
   let totalReads = 0, assignedReads = 0, segments = 0, totalBases = 0, batches = 0, consumed = 0, memoryRetries = 0;
   let batchLimit = Math.min(prepared.options.batchSize, batchLimits.get(blast) || Infinity);
@@ -94,6 +95,8 @@ export async function runPipeline({ fastqFiles, primerText, sampleText, options,
       if (!counts.has(assignment.sample)) counts.set(assignment.sample, { sample: assignment.sample, segments: 0, bases: 0, minLength: Infinity, maxLength: 0 });
       const count = counts.get(assignment.sample); count.segments++; count.bases += output.length;
       count.minLength = Math.min(count.minLength, output.length); count.maxLength = Math.max(count.maxLength, output.length);
+      if (!distributions.has(assignment.sample)) distributions.set(assignment.sample, createReadDistribution());
+      addReadDistribution(distributions.get(assignment.sample), output.length, output.quality);
       const bin = output.length < 100 ? -1 : Math.floor(Math.log(output.length / 100) / Math.log(1.1));
       const key = `${assignment.sample}\t${bin}`;
       if (!histogram.has(key)) histogram.set(key, { sample: assignment.sample, bin, segments: 0, bases: 0 });
@@ -125,10 +128,10 @@ export async function runPipeline({ fastqFiles, primerText, sampleText, options,
   if (batch.length) await processBatch(batch);
   if (!totalReads && !allowEmpty) throw new Error('FASTQ にリードがありません。');
   phase = 'finalizing'; progress('ファイルの集計・出力準備');
-  const rows = [...counts.values()].sort((a, b) => a.sample.localeCompare(b.sample));
+  const rows = [...counts.values()].sort((a, b) => a.sample.localeCompare(b.sample)).map(row => sampleStatistics(row, distributions.get(row.sample)));
   const summary = { totalReads, assignedReads, unassignedReads: totalReads - assignedReads, segments, totalBases, batches, memoryRetries, samples: rows, primerSequences: prepared.primers.length, sampleDefinitions: prepared.samples.length, normalizedPrimerNames: prepared.normalized, elapsedMs: performance.now() - started };
   const files = [...parts].map(([name, chunks]) => ({ name, blob: new Blob(chunks, { type: 'text/plain;charset=utf-8' }) })).sort((a, b) => a.name.localeCompare(b.name));
   if (includeReports) files.push(...reportFiles(summary, [...histogram.values()], { options: prepared.options, diagnostics, fastqFiles }));
   phase = 'complete'; progress('完了');
-  return { summary, files, histogram: [...histogram.values()] };
+  return { summary, files, histogram: [...histogram.values()], distributions: [...distributions].map(([sample, distribution]) => serializeReadDistribution(sample, distribution)) };
 }

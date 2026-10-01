@@ -52,6 +52,20 @@ try {
   assert.equal(splitReport.summary.assignedReads,12);assert.equal(splitReport.summary.samples.length,2);
   assert.equal(splitReport.execution.maxActiveFiles,2);
   assert.equal(splitReport.summary.batches,6);
+  for(const sample of splitReport.summary.samples) {
+    assert.equal(sample.meanLength,400);assert.equal(sample.medianLength,400);
+    assert.deepEqual(sample.lengthHistogram,[{lower:400,upper:400,count:6}]);
+    assert.deepEqual(sample.qualityHistogram,[{lower:40,upper:41,count:6}]);
+  }
+  assert.equal(await split.locator('#sample-results .length-chart').count(),2);
+  assert.equal(await split.locator('#sample-results .quality-chart').count(),2);
+  assert.deepEqual(await split.locator('[data-statistic=mean]').allTextContents(),['400','400']);
+  assert.deepEqual(await split.locator('[data-statistic=median]').allTextContents(),['400','400']);
+  const chartCounts=await split.locator('.distribution-chart').evaluateAll(charts=>charts.map(chart=>[...chart.querySelectorAll('.chart-bar')].reduce((sum,bar)=>sum+Number(bar.dataset.count),0)));
+  assert.deepEqual(chartCounts,[6,6,6,6]);
+  const qualityReport=await split.evaluate(async()=>await (await window.demultiplexer.readFile('quality-histogram.tsv')).text());
+  for(const sample of expected.samples)assert.ok(qualityReport.includes(`${sample.name}\t40\t41\t6\n`));
+  console.log('PASS exact mean/median, per-FASTQ length/quality charts and quality TSV from actual trimmed FASTQ (Q40, not qs:f:30)');
   const progressHistory=await split.evaluate(()=>window.splitProgressHistory);
   assert.ok(progressHistory.some(message=>message.activeFiles===2 && message.totalReads===0 && message.displayedFraction===0),'Starting jobs alone must not advance progress');
   assert.ok(progressHistory.some(message=>message.files?.some(file=>file.consumed===file.size && file.totalReads===0 && file.inputReads===6 && file.fraction===0)),'Read-ahead to EOF must not count as completed analysis');
@@ -172,6 +186,39 @@ try {
   await consensus.waitForFunction(()=>!window.getConsensus.busy);assert.match(await consensus.locator('#status').textContent(),/中止/);
   await consensus.locator('#start').click();await consensus.waitForFunction(()=>!window.getConsensus.busy && !!window.getConsensus.result);
   assert.equal(await consensus.evaluate(()=>window.getConsensus.result.manifest.samples[0].assigned),6);
+  await page.getByRole('tab',{name:/split-reads/}).click();
+  await split.evaluate(async()=>{
+    const {reverseComplement}=await import('./app/demultiplex-core.mjs');
+    const primerText=(await (await fetch('../examples/primer.fa')).text()).match(/>[^\n]+\n[^\n]+\n/g).slice(0,2).join('');
+    const [forward,reverse]=[...primerText.matchAll(/>[^\n]+\n([^\n]+)\n/g)].map(match=>match[1]);
+    const demo=(await (await fetch('../examples/expected.json')).json()).samples[0];
+    const lengths=[[350,360],[390,400,400]],qualities=[[10,20],[30,40,40]];
+    const inputs=lengths.map((group,file)=>new File([group.map((length,index)=>{
+      let sequence=forward+demo.sequence.slice(0,length)+reverseComplement(reverse);
+      let quality='!'.repeat(forward.length)+String.fromCharCode(33+qualities[file][index]).repeat(length)+'!'.repeat(reverse.length);
+      if(index%2) {sequence=reverseComplement(sequence);quality=[...quality].reverse().join('');}
+      return `@varied_${file}_${index} qs:f:7\n${sequence}\n+\n${quality}\n`;
+    }).join('')],`varied-${file}.fq`));
+    window.napSplit.setInputs({fastqFiles:inputs,primerFile:new File([primerText],'primer.fa'),sampleFile:new File([`${demo.name}\t${demo.name}_F\t${demo.name}_R\t0\t0\n`],'sample.txt')});
+  });
+  await split.waitForFunction(()=>!document.getElementById('split').disabled);
+  await split.locator('#split').click();
+  await split.waitForFunction(()=>!window.napSplit.state.busy && window.napSplit.state.files.length===1);
+  const varied=await split.evaluate(async()=>JSON.parse(await (await window.demultiplexer.readFile('run.json')).text()));
+  const sample=varied.summary.samples[0];
+  assert.equal(varied.execution.maxActiveFiles,2);assert.equal(sample.segments,5);
+  assert.equal(sample.minLength,350);assert.equal(sample.maxLength,400);
+  assert.equal(sample.meanLength,380);assert.equal(sample.medianLength,390);
+  assert.deepEqual(sample.qualityHistogram,[{lower:10,upper:11,count:1},{lower:20,upper:21,count:1},{lower:30,upper:31,count:1},{lower:40,upper:41,count:2}]);
+  assert.equal(await split.locator('[data-statistic=mean]').textContent(),'380');
+  assert.equal(await split.locator('[data-statistic=median]').textContent(),'390');
+  await split.locator('.sample-results-scroll').screenshot({path:path.join(output,'nap-split-distributions.png')});
+  await page.setViewportSize({width:390,height:844});
+  await split.locator('.sample-results-scroll').evaluate(element=>element.scrollLeft=element.scrollWidth);
+  assert.equal(await split.locator('.quality-chart').isVisible(),true);
+  assert.equal(await split.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await split.locator('.sample-results-scroll').screenshot({path:path.join(output,'nap-split-distributions-mobile.png')});
+  console.log('PASS varied-length/Q native split across two concurrent files, weighted merge, reverse/trim quality and scrollable mobile charts');
   assert.deepEqual(errors,[]);
   assert.deepEqual(httpErrors,[],'All application and WASM resources must load');
   assert.ok(requests.every(request=>(request.url.startsWith(base+'/') || request.url.startsWith('blob:')) && request.method==='GET'),'Input data never leaves the browser or uses upload requests');
