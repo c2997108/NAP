@@ -133,8 +133,12 @@ Qスコアはトリミング前の元リードの情報です。同じ元リー�
 | `quality-histogram.tsv` | ヘッダーQスコア分布の配列数。下端以上・上端未満 |
 | `length-histogram.tsv` | 従来の長さ区間（100 bp以上は約10%刻み）の配列数・塩基数 |
 | `run.json` | 実行条件、集計値、画面用の分布、品質の取得元・対象配列数 |
+| `split-barcode-results.html` | 実行条件・入力情報・結果表・長さ／品質の分布を含む、単独で開ける結果ページ |
+| `primer.fa` / `sample.txt` | 実際に解析へ渡したプライマーとサンプル定義。表入力の場合は生成した内容 |
 
-これらは「すべて ZIP で保存」に含まれます。FASTQのみのZIPの内容は従来どおりです。
+「すべて ZIP で保存」は全出力ファイルを含みます。「分割 FASTQ をまとめて保存」には、サンプル別FASTQに加え、`split-barcode-results.html`・`primer.fa`・`sample.txt` を含めます。FASTQは前者では `output/` の下、後者ではZIPの直下に配置します。各HTMLのファイルリンクは、そのZIP内の配置に対応しています。
+
+`primer.fa`・`sample.txt` はクリーン化・縮重展開前の、解析に使用したテキストそのものです。解析後に入力欄を編集しても、保存する定義やHTMLの実行条件は変わりません。既存の `primer-clean.fa`・`primer-tags.fa` は別ファイルとして保持します。
 
 ## get-consensus の条件と出力
 
@@ -156,11 +160,14 @@ WASMのメモリー確保が失敗した場合は、同時処理上限を半分�
 | `output-all-clusters.max.uc.fasta` / `.mafft` | 全サンプル統合後の代表配列・整列 |
 | `all.cnt.txt` / `.seq.txt` / `.seq.qual.txt` | サンプル別割当数・配列・品質 |
 | `all.cnt.seq.qual.xlsx` | Excel 集計表 |
+| `get-consensus-results.html` | 結果表・サンプル別の結果・実行条件・ログ・アラインメントを含む、単独で開ける結果ページ |
 | `output-consensus-viewer.html` | 単独で開けるアラインメントビューアー |
 | `work/` / `work-blast/` | 中間結果、BAM / BAI / FAI、VCF、検索結果 |
 | `run.json` / `pipeline.log` | 条件・バージョン・ログ |
 
 split-reads から渡した場合、コンセンサス側の `run.json` の `nap` に、選択ファイル名と分割側の条件・入力名・集計を記録します。ディスクから直接選択したファイルには、この分割履歴を付けません。
+
+両段階の結果HTMLはZIPに含まれ、画面の出力ファイル一覧から個別にも保存できます。CSS・グラフ表示・アラインメント表示に必要なデータとスクリプトをHTML内に埋め込むため、サーバーを停止しても、インターネットに接続しなくてもブラウザーで開けます。get-consensusの結果表からアラインメントを選択し、拡大・差分の強調も使用できます。出力ファイルのリンクを使う場合はZIPを展開し、HTMLと各出力ファイルの位置関係を保ってください。結果HTMLは完了した解析の閲覧用で、解析を再実行する場合はNAPアプリを使用します。
 
 ## 互換性と実行上の制限
 

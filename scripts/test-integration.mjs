@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { readFile,writeFile,mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath,pathToFileURL } from 'node:url';
 import { createServer } from './serve.mjs';
 import { unzipSync,strFromU8 } from '../public/split-reads/vendor/fflate.mjs';
 
@@ -13,6 +13,39 @@ const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.
 const base=`http://127.0.0.1:${server.address().port}`;
 const channel=process.env.BROWSER_CHANNEL||'chrome';
 let browser;
+async function checkSavedPage(name,html,archive,kind) {
+  const directory=path.join(output,'saved-pages',name);await mkdir(directory,{recursive:true});
+  const file=path.join(directory,'results.html');await writeFile(file,html);
+  const context=await browser.newContext({viewport:{width:1440,height:1000}});await context.setOffline(true);
+  const page=await context.newPage(),errors=[],network=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  page.on('request',request=>{if(/^https?:/.test(request.url()))network.push(request.url());});
+  try {
+    await page.goto(pathToFileURL(file).href);
+    if(kind==='split') {
+      await page.waitForFunction(()=>document.querySelectorAll('.distribution-chart').length===4);
+      assert.deepEqual(await page.locator('[data-statistic=mean]').allTextContents(),['400','400']);
+      assert.deepEqual(await page.locator('[data-statistic=median]').allTextContents(),['400','400']);
+      assert.equal(await page.locator('#saved-primer').textContent(),strFromU8(archive['primer.fa']));
+      assert.equal(await page.locator('#saved-sample').textContent(),strFromU8(archive['sample.txt']));
+      assert.equal(await page.locator('#saved-options tr').filter({hasText:'1バッチのリード数'}).locator('td').last().textContent(),'2','Report retains run conditions after UI edits');
+    } else {
+      await page.waitForFunction(()=>document.querySelector('#alignment canvas')?.width>0);
+      assert.equal(await page.locator('#counts tbody tr').count(),2);
+      const first=await page.locator('.sequence-link').first().textContent();
+      await page.locator('.sequence-link').first().click();
+      assert.equal(await page.getByLabel('アラインメントを選択').inputValue(),first);
+      await page.getByLabel('塩基の表示サイズ').evaluate(element=>{element.value='20';element.dispatchEvent(new Event('input'));});
+      assert.equal(await page.getByLabel('塩基の表示サイズ').inputValue(),'20');
+    }
+    const links=await page.locator('a[download]').evaluateAll(elements=>elements.map(element=>decodeURIComponent(element.getAttribute('href').replace(/^\.\//,''))));
+    assert.ok(links.every(link=>Object.hasOwn(archive,link)),`Every output link must resolve within its ZIP: ${links.filter(link=>!Object.hasOwn(archive,link))}`);
+    await page.screenshot({path:path.join(output,`saved-${name}.png`),fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Saved page fits mobile viewport');
+    assert.deepEqual(errors,[]);assert.deepEqual(network,[],'Saved pages must not load network resources or start analysis workers');
+  } finally {await context.close();}
+}
 try {
   browser=await chromium.launch({...(channel==='chromium'?{}:{channel}),headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],requests=[],httpErrors=[];
@@ -37,6 +70,7 @@ try {
   await split.locator('#load-test').click();
   await split.waitForFunction(()=>!document.getElementById('split').disabled);
   await split.locator('#batch-size').fill('2');
+  const submittedDefinitions=await split.evaluate(()=>window.napDefinitions.export());
   await split.evaluate(()=>{
     window.splitProgressHistory=[];
     const original=window.demultiplexer.onProgress;
@@ -88,11 +122,24 @@ try {
     await writeFile(path.join(output,'split-output',sample.name+'.fq'),text);
   }
   console.log('PASS actual BLAST WASM: 12 raw reads -> 2 samples, six intact 400-base reads each');
+  await split.locator('#batch-size').fill('17');
   const splitZipEvent=page.waitForEvent('download');await split.locator('#download-fastq-zip').click();
   await (await splitZipEvent).saveAs(path.join(output,'nap-split-fastq.zip'));
   const splitArchive=unzipSync(await readFile(path.join(output,'nap-split-fastq.zip')));
-  assert.deepEqual(Object.keys(splitArchive).sort(),Object.keys(splitFiles).sort());
+  assert.deepEqual(Object.keys(splitArchive).sort(),[...Object.keys(splitFiles),'primer.fa','sample.txt','split-barcode-results.html'].sort());
   for(const [name,text] of Object.entries(splitFiles))assert.equal(strFromU8(splitArchive[name]),text);
+  assert.equal(strFromU8(splitArchive['primer.fa']),submittedDefinitions.primerText);
+  assert.equal(strFromU8(splitArchive['sample.txt']),submittedDefinitions.sampleText);
+  await checkSavedPage('split-fastq',strFromU8(splitArchive['split-barcode-results.html']),splitArchive,'split');
+  const splitAllZipEvent=page.waitForEvent('download');await split.locator('#download-zip').click();
+  await (await splitAllZipEvent).saveAs(path.join(output,'nap-split-all.zip'));
+  const splitAllArchive=unzipSync(await readFile(path.join(output,'nap-split-all.zip')));
+  assert.equal(strFromU8(splitAllArchive['primer.fa']),submittedDefinitions.primerText);
+  assert.equal(strFromU8(splitAllArchive['sample.txt']),submittedDefinitions.sampleText);
+  for(const [name,text] of Object.entries(splitFiles))assert.equal(strFromU8(splitAllArchive[`output/${name}`]),text);
+  await checkSavedPage('split-all',strFromU8(splitAllArchive['split-barcode-results.html']),splitAllArchive,'split');
+  await split.locator('#batch-size').fill('2');
+  console.log('PASS both split ZIP layouts include exact submitted primer/sample definitions and standalone HTML with offline graphs and valid file links');
   await page.locator('#open-consensus').click();
   await page.getByRole('tab',{name:/get-consensus/}).focus();
   await page.keyboard.press('ArrowLeft');
@@ -163,7 +210,9 @@ try {
   const archiveEvent=page.waitForEvent('download');await consensus.locator('#zip').click();
   const archiveDownload=await archiveEvent;await archiveDownload.saveAs(path.join(output,'nap-consensus.zip'));
   const archive=unzipSync(await readFile(path.join(output,'nap-consensus.zip')));
-  assert.ok(archive['output-consensus.fasta']);assert.ok(archive['all.cnt.seq.qual.xlsx']);assert.ok(archive['output-consensus-viewer.html']);
+  assert.ok(archive['output-consensus.fasta']);assert.ok(archive['all.cnt.seq.qual.xlsx']);assert.ok(archive['output-consensus-viewer.html']);assert.ok(archive['get-consensus-results.html']);
+  await checkSavedPage('get-consensus',strFromU8(archive['get-consensus-results.html']),archive,'consensus');
+  console.log('PASS saved consensus results HTML: offline counts, run options, sequence selection/zoom, alignments and valid local output links');
   const manifest=JSON.parse(strFromU8(archive['run.json']));assert.equal(manifest.nap.selectedFiles.length,2);
   console.log('PASS full WASM consensus pipeline: two representatives, [6,0]/[0,6] counts, ZIP/Excel/viewer/provenance');
   await page.screenshot({path:path.join(output,'nap-consensus-desktop.png'),fullPage:true});

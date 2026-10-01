@@ -62,7 +62,7 @@
   </section>
   <button id="split" class="primary run">FASTQ を分割する</button>
   <section class="card output"><div class="section-head"><h2><span class="step">3</span>分割結果</h2><div class="download-actions"><button id="download-fastq-zip" class="secondary fastq-download" disabled>分割 FASTQ をまとめて保存</button><button id="download-zip" class="secondary" disabled>すべて ZIP で保存</button></div></div>
-    <p class="hint">「分割 FASTQ をまとめて保存」で、サンプル別 FASTQ をひとつの ZIP に保存できます。</p>
+    <p class="hint">どちらの ZIP にも結果ページ（HTML）と、解析に使用した primer.fa・sample.txt を含みます。「分割 FASTQ をまとめて保存」はサンプル別 FASTQ とこれらの保存ファイルをまとめます。</p>
     <progress id="progress" max="1" value="0" aria-label="入力の処理状況"></progress><p id="progress-label" class="hint">FASTQ の読取り → BLAST → バーコード確認 → トリミング・分割</p>
     <p class="hint">各ファイルの総リード数を確認し、分割を終えたリードの割合で進捗を更新します。最終集計が終わると100%になります。</p>
     <div class="table-scroll file-progress" id="file-progress" hidden><table><thead><tr><th>入力ファイル</th><th>状態</th><th>進捗</th><th>処理済み / 全リード</th><th>分類済みリード</th></tr></thead><tbody></tbody></table></div>

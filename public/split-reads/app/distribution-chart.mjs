@@ -49,3 +49,8 @@ export function distributionChart(sample, kind) {
     element('text', { x: left + width / 2, y: 169, 'text-anchor': 'middle', class: 'chart-axis-label' }, axisLabel));
   return svg;
 }
+
+// Embed the same chart renderer in saved HTML, without imports or network use.
+export function distributionChartSource() {
+  return `const svgNamespace=${JSON.stringify(svgNamespace)};const number=${number.toString()};const niceStep=${niceStep.toString()};const element=${element.toString()};const distributionChart=${distributionChart.toString()};`;
+}

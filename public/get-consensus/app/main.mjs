@@ -2,6 +2,7 @@ import { defaults,validateOptions } from './pipeline.mjs';
 import { makeZip } from './zip.mjs';
 import { workbook } from './workbook.mjs';
 import { alignmentViewer,viewerHtml } from './viewer.mjs';
+import { CONSENSUS_RESULT_PAGE,consensusResultPage } from './result-page.mjs';
 const $=s=>document.querySelector(s),form=$('#options');
 let selected=[],worker,result,busy=false,timer,started,viewer,history=[],xlsxUrl;
 let generation=0,inputProvenance=null;
@@ -48,6 +49,7 @@ function options() {
 }
 async function finish(data,token,provenance) {
   const excel=await workbook(data);
+  const savedLog=await data.files.get('pipeline.log')?.text() || '';
   if(token!==generation)return;
   if(provenance) {data.manifest.nap=provenance;data.files.set('run.json',new Blob([JSON.stringify(data.manifest,null,2)]));}
   result=data;$('#results').hidden=false;
@@ -69,8 +71,9 @@ async function finish(data,token,provenance) {
   table.append(tbody);if(!result.rows.length) $('#warnings').textContent+='\nBLAST の閾値を満たすヒットがありません。コンセンサス配列は保存できます。';
   $('#sample-summary').textContent=result.samples.map(s=>`${s.filename}: ${s.reads} reads → ${s.round1} 初回 / ${s.round2} 統合 / ${s.haplotypes} ハプロタイプ、${s.assigned} reads を割当`).join('\n');
   viewer?.dispose();viewer=alignmentViewer($('#alignment'),alignments);
+  result.files.set(CONSENSUS_RESULT_PAGE,new Blob([consensusResultPage(result,savedLog)],{type:'text/html;charset=utf-8'}));
   $('#outputs').replaceChildren();
-  for(const name of ['output-consensus.fastq','output-consensus.fasta','output-all-clusters.max.uc.fasta','all.cnt.txt','all.cnt.seq.qual.xlsx','output-consensus-viewer.html','run.json','pipeline.log']) {
+  for(const name of ['output-consensus.fastq','output-consensus.fasta','output-all-clusters.max.uc.fasta','all.cnt.txt','all.cnt.seq.qual.xlsx',CONSENSUS_RESULT_PAGE,'output-consensus-viewer.html','run.json','pipeline.log']) {
     const b=document.createElement('button');b.className='file-button';b.textContent=name;b.onclick=()=>download(name,result.files.get(name));$('#outputs').append(b);
   }
   $('#consensus-progress').value=1;$('#consensus-progress-value').textContent='100% · 完了';$('#consensus-progress').setAttribute('aria-valuetext','100% · 完了');

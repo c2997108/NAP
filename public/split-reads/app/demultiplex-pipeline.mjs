@@ -1,6 +1,7 @@
 import { prepareInputs, parseHits, assignHits, renderFastq, readFastq } from './demultiplex-core.mjs';
 import { ASSIGNMENT_HEADER, reportFiles } from './demultiplex-results.mjs';
 import { createReadDistribution, addReadDistribution, serializeReadDistribution, sampleStatistics } from './demultiplex-statistics.mjs';
+import { inputDefinitionFiles } from './result-page.mjs';
 
 export { UPSTREAM_COMMIT } from './demultiplex-results.mjs';
 // A file-processing slot reuses its BLAST client. Keep a safe batch limit once
@@ -131,7 +132,10 @@ export async function runPipeline({ fastqFiles, primerText, sampleText, options,
   const rows = [...counts.values()].sort((a, b) => a.sample.localeCompare(b.sample)).map(row => sampleStatistics(row, distributions.get(row.sample)));
   const summary = { totalReads, assignedReads, unassignedReads: totalReads - assignedReads, segments, totalBases, batches, memoryRetries, samples: rows, primerSequences: prepared.primers.length, sampleDefinitions: prepared.samples.length, normalizedPrimerNames: prepared.normalized, elapsedMs: performance.now() - started };
   const files = [...parts].map(([name, chunks]) => ({ name, blob: new Blob(chunks, { type: 'text/plain;charset=utf-8' }) })).sort((a, b) => a.name.localeCompare(b.name));
-  if (includeReports) files.push(...reportFiles(summary, [...histogram.values()], { options: prepared.options, diagnostics, fastqFiles }));
+  if (includeReports) {
+    files.push(...inputDefinitionFiles({ primerText, sampleText }));
+    files.push(...reportFiles(summary, [...histogram.values()], { options: prepared.options, diagnostics, fastqFiles, primerText, sampleText, files }));
+  }
   phase = 'complete'; progress('完了');
   return { summary, files, histogram: [...histogram.values()], distributions: [...distributions].map(([sample, distribution]) => serializeReadDistribution(sample, distribution)) };
 }

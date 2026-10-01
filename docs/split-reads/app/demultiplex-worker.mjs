@@ -5,8 +5,9 @@ import { runFilePool } from './demultiplex-file-pool.mjs';
 import { FileProcessingSlot } from './demultiplex-file-client.mjs';
 import { mergeFileResults } from './demultiplex-results.mjs';
 import { makeZip } from './zip.mjs';
+import { SPLIT_RESULT_PAGE, splitFastqArchiveFiles } from './result-page.mjs';
 
-let files = [], running = false;
+let files = [], fastqReport, running = false;
 async function run(payload) {
   const started = performance.now();
   if (!payload.fastqFiles?.length) throw new Error('FASTQ または FASTQ.gz を選択してください。');
@@ -28,6 +29,7 @@ async function run(payload) {
   postMessage({ ...lastProgress, stage: '分割結果を統合・集計' });
   const output = mergeFileResults(pool.results, prepared, { ...payload, diagnostics: Boolean(payload.diagnostics) }, { ...pool.execution, databaseBuildMs }, performance.now() - started);
   files = output.files;
+  fastqReport = output.fastqReport;
   return { summary: output.summary, files: files.map(({ name, blob }) => ({ name, size: blob.size })) };
 }
 self.onmessage = async ({ data }) => {
@@ -38,6 +40,7 @@ self.onmessage = async ({ data }) => {
       if (running) throw new Error('すでに処理中です。');
       running = true;
       files = [];
+      fastqReport = null;
       try {
         result = await run(payload);
       } finally { running = false; }
@@ -45,10 +48,10 @@ self.onmessage = async ({ data }) => {
       result = files.find(file => file.name === payload.name)?.blob;
       if (!result) throw new Error(`出力がありません: ${payload.name}`);
     } else if (type === 'zip') {
+      if (payload?.fastqOnly && !files.some(file => file.name.startsWith('output/') && file.name.endsWith('.fq'))) throw new Error('分割された FASTQ がありません。');
       const selected = payload?.fastqOnly
-        ? files.filter(file => file.name.startsWith('output/') && file.name.endsWith('.fq')).map(file => ({ ...file, name: file.name.slice('output/'.length) }))
+        ? [...splitFastqArchiveFiles(files), { name: SPLIT_RESULT_PAGE, blob: fastqReport }]
         : files;
-      if (payload?.fastqOnly && !selected.length) throw new Error('分割された FASTQ がありません。');
       result = await makeZip(selected);
     }
     else throw new Error(`Unknown request: ${type}`);
