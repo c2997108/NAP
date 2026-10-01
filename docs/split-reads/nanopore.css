@@ -40,6 +40,7 @@ td button { padding: 6px 10px; }
 .chart-tick, .chart-axis-label { fill: #627580; font-size: 11px; }
 .chart-bar { fill: #257b80; }
 .quality-chart .chart-bar { fill: #8171ac; }
+.quality-coverage { margin: 4px 0; white-space: normal; text-align: center; }
 .chart-bar:hover { opacity: .7; }
 .error { color: #a05850 !important; }
 #files { max-height: 340px; }

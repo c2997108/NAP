@@ -98,10 +98,16 @@ function showResult(result) {
     }
     lengths.append(stats); tr.append(lengths);
     const td = document.createElement('td'); td.append(saveButton(`output/${row.sample}.fq`)); tr.append(td);
-    for (const kind of ['length', 'quality']) { const chart = document.createElement('td'); chart.className = 'distribution-cell'; chart.append(distributionChart(row, kind)); tr.append(chart); }
+    const lengthChart = document.createElement('td'); lengthChart.className = 'distribution-cell'; lengthChart.append(distributionChart(row, 'length')); tr.append(lengthChart);
+    const qualityChart = document.createElement('td'), coverage = document.createElement('p'); qualityChart.className = 'distribution-cell'; coverage.className = 'hint quality-coverage';
+    if (row.qualityReads) {
+      qualityChart.append(distributionChart(row, 'quality'));
+      coverage.textContent = `品質情報あり ${format(row.qualityReads)} / ${format(row.segments)} 配列`;
+    } else coverage.textContent = 'ヘッダーに有効な品質情報なし';
+    qualityChart.append(coverage); tr.append(qualityChart);
     tbody.append(tr);
   }
-  $('result-note').textContent = s.segments ? '長さ・品質はプライマー除去後の出力配列を集計しています。平均QはFASTQ品質（Phred+33）をエラー確率に変換して平均し、Qに戻した値です。元リードの qs:f タグや sequencing_summary の値は使いません。グラフの棒にカーソルを重ねると範囲・配列数を確認できます。逆向きアンプリコンは配列を逆相補鎖、品質を逆順に補正し、1リードから複数配列が得られる場合があります。' : '条件を満たすプライマー対がありませんでした。入力リードは unassigned.fq に保存されています。判定条件と BLAST 判定根拠を確認してください。';
+  $('result-note').textContent = s.segments ? '長さはプライマー除去後の出力配列を集計しています。品質分布は元リードのヘッダーにあるQスコア（qs:f: など）を使用し、品質情報のない配列は除外します。FASTQの品質文字列からの計算は行いません。1リードから複数配列が得られる場合は、各配列に同じ元リードのQスコアを対応付けます。棒にカーソルを重ねると区間・配列数・割合を表示します。' : '条件を満たすプライマー対がありませんでした。入力リードは unassigned.fq に保存されています。判定条件と BLAST 判定根拠を確認してください。';
   $('files').replaceChildren();
   for (const file of result.files) { const li = document.createElement('li'), name = document.createElement('span'), bytes = document.createElement('small'); name.textContent = file.name; bytes.textContent = size(file.size); li.append(name, bytes, saveButton(file.name)); $('files').append(li); }
   log(`完了: ${s.completedFiles} ファイル / 最大 ${s.concurrency} ファイル同時処理 / ${s.totalReads} 入力リード → ${s.segments} 配列 / ${s.samples.length} サンプル (${(s.elapsedMs / 1000).toFixed(1)} 秒)`);

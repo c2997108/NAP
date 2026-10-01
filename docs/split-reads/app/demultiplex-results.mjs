@@ -7,10 +7,10 @@ const textBlob = chunks => new Blob(chunks, { type: 'text/plain;charset=utf-8' }
 export function reportFiles(summary, histogram, { options, diagnostics, fastqFiles, execution }) {
   const rows = summary.samples;
   const reports = {
-    'sample-counts.tsv': 'sample\tsegments\tbases\tmin_length\tmax_length\tmean_length\tmedian_length\n' + rows.map(row => `${row.sample}\t${row.segments}\t${row.bases}\t${row.minLength}\t${row.maxLength}\t${row.meanLength.toFixed(2)}\t${row.medianLength}\n`).join(''),
+    'sample-counts.tsv': 'sample\tsegments\tbases\tmin_length\tmax_length\tmean_length\tmedian_length\tquality_reads\tquality_missing\n' + rows.map(row => `${row.sample}\t${row.segments}\t${row.bases}\t${row.minLength}\t${row.maxLength}\t${row.meanLength.toFixed(2)}\t${row.medianLength}\t${row.qualityReads}\t${row.qualityMissing}\n`).join(''),
     'length-histogram.tsv': 'sample\tlower_bp\tupper_bp\tsegments\tbases\n' + [...histogram].sort((a, b) => a.sample.localeCompare(b.sample) || a.bin - b.bin).map(h => [h.sample, h.bin === -1 ? 0 : Math.ceil(100 * 1.1 ** h.bin), h.bin === -1 ? 99 : Math.ceil(100 * 1.1 ** (h.bin + 1)) - 1, h.segments, h.bases].join('\t') + '\n').join(''),
     'length-distribution.tsv': 'sample\tlower_bp\tupper_bp_inclusive\tsegments\n' + rows.flatMap(row => row.lengthHistogram.map(bin => `${row.sample}\t${bin.lower}\t${bin.upper}\t${bin.count}\n`)).join(''),
-    'quality-histogram.tsv': 'sample\tlower_mean_q\tupper_mean_q_exclusive\tsegments\n' + rows.flatMap(row => row.qualityHistogram.map(bin => `${row.sample}\t${bin.lower}\t${bin.upper}\t${bin.count}\n`)).join(''),
+    'quality-histogram.tsv': 'sample\tlower_header_q\tupper_header_q_exclusive\tsegments\n' + rows.flatMap(row => row.qualityHistogram.map(bin => `${row.sample}\t${bin.lower}\t${bin.upper}\t${bin.count}\n`)).join(''),
     'output.stats': `Total: ${summary.totalReads} reads, Demultiplexed: ${summary.segments} reads\nAssigned input reads: ${summary.assignedReads}\nUnassigned input reads: ${summary.unassignedReads}\n` + rows.map(row => `  ${row.sample}: ${row.segments} reads, ${row.bases} bp\n`).join(''),
     'run.json': JSON.stringify({ tool: 'webBLASTN nanopore split-barcode', blastVersion: '2.16.0', upstreamCommit: UPSTREAM_COMMIT, options, diagnostics, qualityMetric: QUALITY_METRIC, inputs: fastqFiles.map(file => ({ name: file.name, size: file.size })), ...(execution ? { execution } : {}), summary }, null, 2) + '\n'
   };

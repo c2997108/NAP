@@ -96,7 +96,7 @@ export async function runPipeline({ fastqFiles, primerText, sampleText, options,
       const count = counts.get(assignment.sample); count.segments++; count.bases += output.length;
       count.minLength = Math.min(count.minLength, output.length); count.maxLength = Math.max(count.maxLength, output.length);
       if (!distributions.has(assignment.sample)) distributions.set(assignment.sample, createReadDistribution());
-      addReadDistribution(distributions.get(assignment.sample), output.length, output.quality);
+      addReadDistribution(distributions.get(assignment.sample), output.length, record.header);
       const bin = output.length < 100 ? -1 : Math.floor(Math.log(output.length / 100) / Math.log(1.1));
       const key = `${assignment.sample}\t${bin}`;
       if (!histogram.has(key)) histogram.set(key, { sample: assignment.sample, bin, segments: 0, bases: 0 });

@@ -1,24 +1,36 @@
 // Keep frequency counts, not a second copy of every read. Exact lengths are
 // merged across input jobs before computing the median and display bins.
 export const QUALITY_METRIC = {
-  source: 'trimmed FASTQ quality (Phred+33)',
-  formula: '-10 * log10(mean(10 ** (-Q / 10)))',
+  source: 'original input read FASTQ header quality annotation',
+  fields: ['qs:f:', 'qscore=', 'mean_qscore=', 'mean_qscore_template=', 'qs='],
+  missing: 'excluded; no fallback to FASTQ base quality characters',
+  duplicates: 'last quality annotation wins',
   binWidth: 1,
 };
-const errorProbabilities = Float64Array.from({ length: 94 }, (_, q) => 10 ** (-q / 10));
 const increment = (map, key, count = 1) => map.set(key, (map.get(key) || 0) + count);
+
+export function headerQuality(header) {
+  // Only inspect annotations after the read ID. Unrelated metadata numbers
+  // (read, channel, duration, etc.) must never become quality scores.
+  const separator = header.search(/\s/);
+  if (separator < 0) return null;
+  let quality = null;
+  for (const match of header.slice(separator).matchAll(/(?:^|\s)(?:qs:f:|(?:qscore|mean_qscore|mean_qscore_template|qs)=)(\S*)/gi)) {
+    const value = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(match[1]) ? Number(match[1]) : NaN;
+    // The upstream script can append a new qs:f: after an existing one.
+    quality = Number.isFinite(value) && value >= 0 ? value : null;
+  }
+  return quality;
+}
 
 export function createReadDistribution() {
   return { lengths: new Map(), qualities: new Map() };
 }
 
-export function addReadDistribution(distribution, length, quality) {
+export function addReadDistribution(distribution, length, header) {
   increment(distribution.lengths, length);
-  let errorSum = 0;
-  for (let index = 0; index < quality.length; index++) errorSum += errorProbabilities[quality.charCodeAt(index) - 33];
-  const meanQuality = -10 * Math.log10(errorSum / quality.length);
-  // Roundoff must not put an all-Q40 read in the Q39 bin.
-  increment(distribution.qualities, Math.min(93, Math.max(0, Math.floor(meanQuality + 1e-9))));
+  const quality = headerQuality(header);
+  if (quality !== null) increment(distribution.qualities, Math.floor(quality));
 }
 
 export function serializeReadDistribution(sample, distribution) {
@@ -38,7 +50,7 @@ export function niceStep(value) {
 
 export function sampleStatistics(row, distribution) {
   const lengths = [...distribution.lengths].sort((a, b) => a[0] - b[0]);
-  if (!row.segments) return { ...row, meanLength: null, medianLength: null, lengthHistogram: [], qualityHistogram: [] };
+  if (!row.segments) return { ...row, meanLength: null, medianLength: null, lengthHistogram: [], qualityHistogram: [], qualityReads: 0, qualityMissing: 0 };
   const ranks = [Math.floor((row.segments - 1) / 2), Math.floor(row.segments / 2)];
   let cumulative = 0, rankIndex = 0, middleSum = 0;
   for (const [length, count] of lengths) {
@@ -51,8 +63,10 @@ export function sampleStatistics(row, distribution) {
   const bins = Array.from({ length: Math.floor((row.maxLength - start) / width) + 1 }, (_, index) => ({ lower: start + index * width, upper: start + (index + 1) * width - 1, count: 0 }));
   for (const [length, count] of lengths) bins[Math.floor((length - start) / width)].count += count;
   const qualities = [...distribution.qualities].sort((a, b) => a[0] - b[0]);
+  const qualityReads = qualities.reduce((sum, [, count]) => sum + count, 0);
   return { ...row, meanLength: row.bases / row.segments, medianLength: middleSum / 2,
     lengthHistogram: bins,
     qualityHistogram: qualities.map(([lower, count]) => ({ lower, upper: lower + 1, count })),
+    qualityReads, qualityMissing: row.segments - qualityReads,
   };
 }

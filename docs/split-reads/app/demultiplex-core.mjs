@@ -175,7 +175,7 @@ export function renderFastq(record, assignment) {
   if (assignment.strand === -1) { sequence = reverseComplement(sequence); quality = [...quality].reverse().join(''); }
   const metadata = record.header.slice(record.id.length).replace(/\t/g, ' ');
   const name = `${record.id}:${assignment.number}:${assignment.leftPrimer}:${assignment.rightPrimer}:${assignment.start}:${assignment.end}:${assignment.strand}${metadata}`;
-  return { text: `@${name}\n${sequence}\n+\n${quality}\n`, length: sequence.length, quality };
+  return { text: `@${name}\n${sequence}\n+\n${quality}\n`, length: sequence.length };
 }
 // Incremental four-line FASTQ reader, including gzip and concatenated gzip members.
 export async function* readFastq(file, onBytes = () => {}) {

@@ -12,8 +12,9 @@ function element(name, attributes = {}, text) {
 export function distributionChart(sample, kind) {
   const isLength = kind === 'length', bins = isLength ? sample.lengthHistogram : sample.qualityHistogram;
   const title = isLength ? 'リード長分布' : 'クオリティ分布';
-  const axisLabel = isLength ? 'リード長 (bp)' : 'リードの平均Q (Phred)';
-  const svg = element('svg', { viewBox: '0 0 300 176', role: 'img', 'aria-label': `${sample.sample} の${title}：${number(sample.segments)} 配列`, class: `distribution-chart ${kind}-chart` });
+  const axisLabel = isLength ? 'リード長 (bp)' : '元リードのヘッダーQスコア';
+  const total = isLength ? sample.segments : sample.qualityReads;
+  const svg = element('svg', { viewBox: '0 0 300 176', role: 'img', 'aria-label': `${sample.sample} の${title}：${number(total)} 配列`, class: `distribution-chart ${kind}-chart` });
   svg.append(element('title', {}, `${sample.sample} の${title}`), element('desc', {}, `${axisLabel}ごとの出力配列数。棒にカーソルを重ねると範囲と配列数を表示します。`));
   const left = 48, top = 22, width = 240, height = 112, bottom = top + height;
   let low = bins[0].lower, high = bins.at(-1).upper + (isLength ? 1 : 0);
@@ -37,7 +38,7 @@ export function distributionChart(sample, kind) {
     const binEnd = bin.upper + (isLength ? 1 : 0), barWidth = x(binEnd) - x(bin.lower);
     const bar = element('rect', { x: x(bin.lower), y: y(bin.count), width: Math.max(0.5, barWidth - Math.min(1, barWidth * 0.1)), height: bottom - y(bin.count), class: 'chart-bar', 'data-count': bin.count });
     const range = isLength ? (bin.lower === bin.upper ? `${number(bin.lower)} bp` : `${number(bin.lower)}–${number(bin.upper)} bp`) : `Q ${bin.lower} 以上 ${bin.upper} 未満`;
-    bar.append(element('title', {}, `${range}：${number(bin.count)} 配列 (${number(bin.count / sample.segments * 100)}%)`));
+    bar.append(element('title', {}, `${range}：${number(bin.count)} 配列 (${number(bin.count / total * 100)}%)`));
     svg.append(bar);
   }
   for (let tick = low; tick <= high; tick += xStep) {

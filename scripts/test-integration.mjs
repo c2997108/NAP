@@ -55,7 +55,8 @@ try {
   for(const sample of splitReport.summary.samples) {
     assert.equal(sample.meanLength,400);assert.equal(sample.medianLength,400);
     assert.deepEqual(sample.lengthHistogram,[{lower:400,upper:400,count:6}]);
-    assert.deepEqual(sample.qualityHistogram,[{lower:40,upper:41,count:6}]);
+    assert.deepEqual(sample.qualityHistogram,[{lower:30,upper:31,count:6}]);
+    assert.equal(sample.qualityReads,6);assert.equal(sample.qualityMissing,0);
   }
   assert.equal(await split.locator('#sample-results .length-chart').count(),2);
   assert.equal(await split.locator('#sample-results .quality-chart').count(),2);
@@ -64,8 +65,8 @@ try {
   const chartCounts=await split.locator('.distribution-chart').evaluateAll(charts=>charts.map(chart=>[...chart.querySelectorAll('.chart-bar')].reduce((sum,bar)=>sum+Number(bar.dataset.count),0)));
   assert.deepEqual(chartCounts,[6,6,6,6]);
   const qualityReport=await split.evaluate(async()=>await (await window.demultiplexer.readFile('quality-histogram.tsv')).text());
-  for(const sample of expected.samples)assert.ok(qualityReport.includes(`${sample.name}\t40\t41\t6\n`));
-  console.log('PASS exact mean/median, per-FASTQ length/quality charts and quality TSV from actual trimmed FASTQ (Q40, not qs:f:30)');
+  for(const sample of expected.samples)assert.ok(qualityReport.includes(`${sample.name}\t30\t31\t6\n`));
+  console.log('PASS exact mean/median, per-FASTQ charts and quality TSV from header qs:f:30, ignoring Q40 base quality characters');
   const progressHistory=await split.evaluate(()=>window.splitProgressHistory);
   assert.ok(progressHistory.some(message=>message.activeFiles===2 && message.totalReads===0 && message.displayedFraction===0),'Starting jobs alone must not advance progress');
   assert.ok(progressHistory.some(message=>message.files?.some(file=>file.consumed===file.size && file.totalReads===0 && file.inputReads===6 && file.fraction===0)),'Read-ahead to EOF must not count as completed analysis');
@@ -193,13 +194,16 @@ try {
     const [forward,reverse]=[...primerText.matchAll(/>[^\n]+\n([^\n]+)\n/g)].map(match=>match[1]);
     const demo=(await (await fetch('../examples/expected.json')).json()).samples[0];
     const lengths=[[350,360],[390,400,400]],qualities=[[10,20],[30,40,40]];
+    const annotations=[['qs:f:10.2',''],['qscore=30.5','qs:f:NaN','mean_qscore_template=40.1']];
     const inputs=lengths.map((group,file)=>new File([group.map((length,index)=>{
       let sequence=forward+demo.sequence.slice(0,length)+reverseComplement(reverse);
       let quality='!'.repeat(forward.length)+String.fromCharCode(33+qualities[file][index]).repeat(length)+'!'.repeat(reverse.length);
       if(index%2) {sequence=reverseComplement(sequence);quality=[...quality].reverse().join('');}
-      return `@varied_${file}_${index} qs:f:7\n${sequence}\n+\n${quality}\n`;
+      return `@varied_${file}_${index}${annotations[file][index]?' '+annotations[file][index]:''}\n${sequence}\n+\n${quality}\n`;
     }).join('')],`varied-${file}.fq`));
-    window.napSplit.setInputs({fastqFiles:inputs,primerFile:new File([primerText],'primer.fa'),sampleFile:new File([`${demo.name}\t${demo.name}_F\t${demo.name}_R\t0\t0\n`],'sample.txt')});
+    const primerFile=new File([primerText],'primer.fa'),sampleFile=new File([`${demo.name}\t${demo.name}_F\t${demo.name}_R\t0\t0\n`],'sample.txt');
+    window.noQualityTestInputs={fastqFiles:await Promise.all(inputs.map(async file=>new File([(await file.text()).replace(/^(@\S+)[^\n]*$/gm,'$1')],file.name))),primerFile,sampleFile};
+    window.napSplit.setInputs({fastqFiles:inputs,primerFile,sampleFile});
   });
   await split.waitForFunction(()=>!document.getElementById('split').disabled);
   await split.locator('#split').click();
@@ -209,7 +213,11 @@ try {
   assert.equal(varied.execution.maxActiveFiles,2);assert.equal(sample.segments,5);
   assert.equal(sample.minLength,350);assert.equal(sample.maxLength,400);
   assert.equal(sample.meanLength,380);assert.equal(sample.medianLength,390);
-  assert.deepEqual(sample.qualityHistogram,[{lower:10,upper:11,count:1},{lower:20,upper:21,count:1},{lower:30,upper:31,count:1},{lower:40,upper:41,count:2}]);
+  assert.deepEqual(sample.qualityHistogram,[{lower:10,upper:11,count:1},{lower:30,upper:31,count:1},{lower:40,upper:41,count:1}]);
+  assert.equal(sample.qualityReads,3);assert.equal(sample.qualityMissing,2);
+  assert.equal(await split.locator('.quality-coverage').textContent(),'品質情報あり 3 / 5 配列');
+  const qualityTooltips=await split.locator('.quality-chart .chart-bar title').allTextContents();
+  assert.ok(qualityTooltips.every(text=>text.includes('33.3%')),'Quality percentages use only the three annotated reads');
   assert.equal(await split.locator('[data-statistic=mean]').textContent(),'380');
   assert.equal(await split.locator('[data-statistic=median]').textContent(),'390');
   await split.locator('.sample-results-scroll').screenshot({path:path.join(output,'nap-split-distributions.png')});
@@ -218,7 +226,21 @@ try {
   assert.equal(await split.locator('.quality-chart').isVisible(),true);
   assert.equal(await split.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await split.locator('.sample-results-scroll').screenshot({path:path.join(output,'nap-split-distributions-mobile.png')});
-  console.log('PASS varied-length/Q native split across two concurrent files, weighted merge, reverse/trim quality and scrollable mobile charts');
+  console.log('PASS mixed header annotations and missing/invalid scores across two concurrent files, correct coverage/percentages and mobile charts');
+  await page.setViewportSize({width:1440,height:1000});
+  await split.evaluate(()=>window.napSplit.setInputs(window.noQualityTestInputs));
+  await split.waitForFunction(()=>!document.getElementById('split').disabled);
+  await split.locator('#split').click();
+  await split.waitForFunction(()=>!window.napSplit.state.busy && window.napSplit.state.files.length===1);
+  const noQuality=await split.evaluate(async()=>JSON.parse(await (await window.demultiplexer.readFile('run.json')).text()));
+  assert.equal(noQuality.summary.samples[0].qualityReads,0);
+  assert.equal(noQuality.summary.samples[0].qualityMissing,5);
+  assert.deepEqual(noQuality.summary.samples[0].qualityHistogram,[]);
+  assert.equal(await split.locator('.quality-chart').count(),0);
+  assert.equal(await split.locator('.length-chart').count(),1);
+  assert.equal(await split.locator('.quality-coverage').textContent(),'ヘッダーに有効な品質情報なし');
+  await split.locator('.sample-results-scroll').screenshot({path:path.join(output,'nap-split-no-quality.png')});
+  console.log('PASS no quality graph when headers have no quality annotations, regardless of FASTQ base quality characters');
   assert.deepEqual(errors,[]);
   assert.deepEqual(httpErrors,[],'All application and WASM resources must load');
   assert.ok(requests.every(request=>(request.url.startsWith(base+'/') || request.url.startsWith('blob:')) && request.method==='GET'),'Input data never leaves the browser or uses upload requests');
