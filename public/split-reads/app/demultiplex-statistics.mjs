@@ -60,8 +60,12 @@ export function sampleStatistics(row, distribution) {
   }
   const width = niceStep((row.maxLength - row.minLength + 1) / 32);
   const start = Math.floor(row.minLength / width) * width;
-  const bins = Array.from({ length: Math.floor((row.maxLength - start) / width) + 1 }, (_, index) => ({ lower: start + index * width, upper: start + (index + 1) * width - 1, count: 0 }));
-  for (const [length, count] of lengths) bins[Math.floor((length - start) / width)].count += count;
+  const bins = Array.from({ length: Math.floor((row.maxLength - start) / width) + 1 }, (_, index) => ({ lower: start + index * width, upper: start + (index + 1) * width - 1, count: 0, bases: 0 }));
+  for (const [length, count] of lengths) {
+    const bin = bins[Math.floor((length - start) / width)];
+    bin.count += count;
+    bin.bases += length * count;
+  }
   const qualities = [...distribution.qualities].sort((a, b) => a[0] - b[0]);
   const qualityReads = qualities.reduce((sum, [, count]) => sum + count, 0);
   return { ...row, meanLength: row.bases / row.segments, medianLength: middleSum / 2,

@@ -107,7 +107,7 @@ function showResult(result) {
     qualityChart.append(coverage); tr.append(qualityChart);
     tbody.append(tr);
   }
-  $('result-note').textContent = s.segments ? '長さはプライマー除去後の出力配列を集計しています。品質分布は元リードのヘッダーにあるQスコア（qs:f: など）を使用し、品質情報のない配列は除外します。FASTQの品質文字列からの計算は行いません。1リードから複数配列が得られる場合は、各配列に同じ元リードのQスコアを対応付けます。棒にカーソルを重ねると区間・配列数・割合を表示します。' : '条件を満たすプライマー対がありませんでした。入力リードは unassigned.fq に保存されています。判定条件と BLAST 判定根拠を確認してください。';
+  $('result-note').textContent = s.segments ? '長さはプライマー除去後の出力配列を集計し、長さ分布の縦軸は各区間の総塩基数（bp）を表示します。品質分布は元リードのヘッダーにあるQスコア（qs:f: など）を使用し、品質情報のない配列は除外します。FASTQの品質文字列からの計算は行いません。1リードから複数配列が得られる場合は、各配列に同じ元リードのQスコアを対応付けます。棒にカーソルを重ねると区間・塩基数（長さ分布）・配列数・割合を表示します。長さ分布の割合は全出力塩基数に対する割合です。' : '条件を満たすプライマー対がありませんでした。入力リードは unassigned.fq に保存されています。判定条件と BLAST 判定根拠を確認してください。';
   $('files').replaceChildren();
   for (const file of result.files) { const li = document.createElement('li'), name = document.createElement('span'), bytes = document.createElement('small'); name.textContent = file.name; bytes.textContent = size(file.size); li.append(name, bytes, saveButton(file.name)); $('files').append(li); }
   log(`完了: ${s.completedFiles} ファイル / 最大 ${s.concurrency} ファイル同時処理 / ${s.totalReads} 入力リード → ${s.segments} 配列 / ${s.samples.length} サンプル (${(s.elapsedMs / 1000).toFixed(1)} 秒)`);

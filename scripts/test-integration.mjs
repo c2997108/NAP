@@ -26,6 +26,8 @@ async function checkSavedPage(name,html,archive,kind) {
       await page.waitForFunction(()=>document.querySelectorAll('.distribution-chart').length===4);
       assert.deepEqual(await page.locator('[data-statistic=mean]').allTextContents(),['400','400']);
       assert.deepEqual(await page.locator('[data-statistic=median]').allTextContents(),['400','400']);
+      assert.deepEqual(await page.locator('.length-chart .chart-bar').evaluateAll(bars=>bars.map(bar=>Number(bar.dataset.value))),[2400,2400]);
+      assert.deepEqual(await page.locator('.length-chart .chart-axis-label').allTextContents(),['塩基数 (bp)','リード長 (bp)','塩基数 (bp)','リード長 (bp)']);
       assert.equal(await page.locator('#saved-primer').textContent(),strFromU8(archive['primer.fa']));
       assert.equal(await page.locator('#saved-sample').textContent(),strFromU8(archive['sample.txt']));
       assert.equal(await page.locator('#saved-options tr').filter({hasText:'1バッチのリード数'}).locator('td').last().textContent(),'2','Report retains run conditions after UI edits');
@@ -88,7 +90,7 @@ try {
   assert.equal(splitReport.summary.batches,6);
   for(const sample of splitReport.summary.samples) {
     assert.equal(sample.meanLength,400);assert.equal(sample.medianLength,400);
-    assert.deepEqual(sample.lengthHistogram,[{lower:400,upper:400,count:6}]);
+    assert.deepEqual(sample.lengthHistogram,[{lower:400,upper:400,count:6,bases:2400}]);
     assert.deepEqual(sample.qualityHistogram,[{lower:30,upper:31,count:6}]);
     assert.equal(sample.qualityReads,6);assert.equal(sample.qualityMissing,0);
   }
@@ -98,6 +100,8 @@ try {
   assert.deepEqual(await split.locator('[data-statistic=median]').allTextContents(),['400','400']);
   const chartCounts=await split.locator('.distribution-chart').evaluateAll(charts=>charts.map(chart=>[...chart.querySelectorAll('.chart-bar')].reduce((sum,bar)=>sum+Number(bar.dataset.count),0)));
   assert.deepEqual(chartCounts,[6,6,6,6]);
+  const chartValues=await split.locator('.distribution-chart').evaluateAll(charts=>charts.map(chart=>[...chart.querySelectorAll('.chart-bar')].reduce((sum,bar)=>sum+Number(bar.dataset.value),0)));
+  assert.deepEqual(chartValues,[2400,6,2400,6]);
   const qualityReport=await split.evaluate(async()=>await (await window.demultiplexer.readFile('quality-histogram.tsv')).text());
   for(const sample of expected.samples)assert.ok(qualityReport.includes(`${sample.name}\t30\t31\t6\n`));
   console.log('PASS exact mean/median, per-FASTQ charts and quality TSV from header qs:f:30, ignoring Q40 base quality characters');
@@ -262,6 +266,11 @@ try {
   assert.equal(varied.execution.maxActiveFiles,2);assert.equal(sample.segments,5);
   assert.equal(sample.minLength,350);assert.equal(sample.maxLength,400);
   assert.equal(sample.meanLength,380);assert.equal(sample.medianLength,390);
+  const lengthBars=await split.locator('.length-chart .chart-bar').evaluateAll(bars=>bars.map(bar=>({value:Number(bar.dataset.value),height:Number(bar.getAttribute('height')),tooltip:bar.querySelector('title').textContent})));
+  assert.deepEqual(lengthBars.map(bar=>bar.value),[350,360,390,800]);
+  assert.ok(Math.abs(lengthBars[3].height/lengthBars[0].height-800/350)<1e-10,'Bar heights scale with actual bases, including two 400 bp reads');
+  assert.match(lengthBars[3].tooltip,/800 bp \/ 2 配列 \(42\.1%\)/,'Length percentages use the 1900 output bases');
+  assert.deepEqual(await split.locator('.length-chart .chart-axis-label').allTextContents(),['塩基数 (bp)','リード長 (bp)']);
   assert.deepEqual(sample.qualityHistogram,[{lower:10,upper:11,count:1},{lower:30,upper:31,count:1},{lower:40,upper:41,count:1}]);
   assert.equal(sample.qualityReads,3);assert.equal(sample.qualityMissing,2);
   assert.equal(await split.locator('.quality-coverage').textContent(),'品質情報あり 3 / 5 配列');

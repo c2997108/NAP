@@ -17,11 +17,12 @@ test('length mean and exact median handle odd counts, repeated lengths, and even
   const odd = fileResult([10, 10, 20, 50, 100]).summary.samples[0];
   assert.equal(odd.meanLength, 38); assert.equal(odd.medianLength, 20);
   assert.equal(odd.lengthHistogram.reduce((sum, bin) => sum + bin.count, 0), 5);
+  assert.equal(odd.lengthHistogram.reduce((sum, bin) => sum + bin.bases, 0), 190);
   const even = fileResult([1, 2, 7, 12]).summary.samples[0];
   assert.equal(even.meanLength, 5.5); assert.equal(even.medianLength, 4.5);
   const single = fileResult([400]).summary.samples[0];
   assert.equal(single.meanLength, 400); assert.equal(single.medianLength, 400);
-  assert.deepEqual(single.lengthHistogram, [{ lower: 400, upper: 400, count: 1 }]);
+  assert.deepEqual(single.lengthHistogram, [{ lower: 400, upper: 400, count: 1, bases: 400 }]);
 });
 
 test('parallel files merge length frequencies before computing sample medians and read-weighted means', async () => {
@@ -34,12 +35,16 @@ test('parallel files merge length frequencies before computing sample medians an
   assert.equal(row.meanLength, 220 / 7); assert.equal(row.medianLength, 20);
   assert.equal(row.minLength, 10); assert.equal(row.maxLength, 100);
   assert.equal(row.lengthHistogram.reduce((sum, bin) => sum + bin.count, 0), 7);
+  assert.equal(row.lengthHistogram.reduce((sum, bin) => sum + bin.bases, 0), 220);
   assert.deepEqual(row.qualityHistogram, [{ lower: 10, upper: 11, count: 5 }, { lower: 40, upper: 41, count: 2 }]);
   assert.equal(row.qualityReads, 7); assert.equal(row.qualityMissing, 0);
   const counts = await merged.files.find(file => file.name === 'sample-counts.tsv').blob.text();
   assert.equal(counts, 'sample\tsegments\tbases\tmin_length\tmax_length\tmean_length\tmedian_length\tquality_reads\tquality_missing\nsample\t7\t220\t10\t100\t31.43\t20\t7\t0\n');
   const qualities = await merged.files.find(file => file.name === 'quality-histogram.tsv').blob.text();
   assert.match(qualities, /sample\t10\t11\t5\n/); assert.match(qualities, /sample\t40\t41\t2\n/);
+  const lengths = await merged.files.find(file => file.name === 'length-distribution.tsv').blob.text();
+  assert.match(lengths, /^sample\tlower_bp\tupper_bp_inclusive\tsegments\tbases\n/);
+  assert.match(lengths, /sample\t20\t24\t4\t80\n/);
   const manifest = JSON.parse(await merged.files.find(file => file.name === 'run.json').blob.text());
   assert.equal(manifest.summary.samples[0].medianLength, 20);
   assert.match(manifest.qualityMetric.source, /header quality annotation/);
@@ -95,10 +100,12 @@ test('missing header quality is excluded while length statistics and cross-file 
   assert.equal(missing.meanLength, 150); assert.equal(missing.medianLength, 150);
 });
 
-test('wide length ranges keep all reads in compact bins while the median stays exact', () => {
+test('wide length ranges sum actual bases of differing lengths in each bin while the median stays exact', () => {
   const row = fileResult([1, 99, 100, 400, 100000]).summary.samples[0];
   assert.equal(row.medianLength, 100);
   assert.ok(row.lengthHistogram.length <= 33);
   assert.equal(row.lengthHistogram.reduce((sum, bin) => sum + bin.count, 0), 5);
+  assert.equal(row.lengthHistogram.reduce((sum, bin) => sum + bin.bases, 0), 100600);
+  assert.deepEqual(row.lengthHistogram[0], { lower: 0, upper: 4999, count: 4, bases: 600 });
   assert.ok(row.lengthHistogram.some(bin => bin.count === 0), 'Gaps remain visible');
 });
