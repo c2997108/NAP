@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
-const ignored=new Set(['node_modules','test-results','build','.git']);
+const ignored=new Set(['node_modules','test-results','build','.git','data','results']);
 const relative=file=>path.relative(root,file).split(path.sep).join('/');
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const readJson=async name=>JSON.parse(await readFile(path.join(root,name),'utf8'));
@@ -29,7 +29,7 @@ for(const name of ['README.md','LICENSE','THIRD_PARTY_NOTICES.md','sources/READM
   'scripts/serve.mjs','scripts/prepare-pages.mjs','scripts/test-integration.mjs','scripts/test-service-worker.mjs','public/index.html','public/nap.mjs',
   'public/bootstrap.mjs','public/isolation.mjs','public/coi-serviceworker.js',
   'public/coi-serviceworker-LICENSE.txt','public/coi-serviceworker.manifest.json',
-  'public/nap.css','public/engine.css','public/split-reads/index.html','public/get-consensus/index.html',
+  'public/nap.css','public/engine.css','public/split-reads/index.html','public/get-consensus/index.html','public/annotation/index.html','public/annotation/app/core.mjs','public/annotation/app/pipeline.mjs',
   'public/shared/wasm/THIRD_PARTY_NOTICES.txt','public/get-consensus/wasm/THIRD_PARTY_NOTICES.txt',
   'public/examples/raw-A.fastq.gz','public/examples/raw-B.fastq.gz','public/examples/primer.fa',
   'public/examples/sample.txt','public/examples/expected.json'])requireFile(name);
@@ -78,6 +78,8 @@ assert.equal(digest(vendorSplit),digest(vendorConsensus),'Both stages use the sa
 for(const prefix of ['split-reads','get-consensus'])requireFile('public/'+prefix+'/vendor/fflate-LICENSE.txt');
 const upstream=await readJson('upstream/provenance.json');
 for(const [name,expected] of Object.entries(upstream.files))await check(path.join(root,'upstream',name),expected);
+const annotationUpstream=await readJson('upstream/annotation-provenance.json');
+for(const [name,expected] of Object.entries(annotationUpstream.files))await check(path.join(root,'upstream',name),expected);
 const coi=await readJson('public/coi-serviceworker.manifest.json');
 assert.equal(coi.version,'0.1.7');assert.equal(coi.license,'MIT');
 for(const [name,expected] of Object.entries(coi.files))await check(path.join(root,'public',name),expected);
@@ -86,6 +88,9 @@ function checkReference(file,specifier,html=false) {
   if(!specifier.startsWith('.'))return;
   const target=fileURLToPath(new URL(specifier,pathToFileURL(file)));
   let name=relative(target).split(/[?#]/)[0];
+  // This optional DB is mounted from ignored data/ by the local server and can
+  // also be supplied through the browser folder/FASTA inputs. It is not bundled.
+  if(name==='public/annotation/database/manifest.json')return;
   if(!html && specifier.endsWith('/')) {
     assert.ok([...names].some(file=>file.startsWith(name.replace(/\/$/,'')+'/')),`Missing packaged directory (case-sensitive): ${name}`);
     return;

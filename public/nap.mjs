@@ -1,9 +1,11 @@
 const $=id=>document.getElementById(id);
-const stages=['split-reads','get-consensus'];
-const splitFrame=$('split-frame'),consensusFrame=$('consensus-frame');
+const stages=['split-reads','get-consensus','annotation'];
+const splitFrame=$('split-frame'),consensusFrame=$('consensus-frame'),annotationFrame=$('annotation-frame');
+const frames={'split-reads':splitFrame,'get-consensus':consensusFrame,annotation:annotationFrame};
 let active='split-reads',signature='',selected=new Set(),transferToken=0,transferring=false;
 const split=()=>splitFrame.contentWindow.napSplit;
 const consensus=()=>consensusFrame.contentWindow.napConsensus;
+const annotation=()=>annotationFrame.contentWindow.napAnnotation;
 const size=bytes=>bytes<1024?`${bytes} B`:bytes<1048576?`${(bytes/1024).toFixed(1)} KiB`:`${(bytes/1048576).toFixed(1)} MiB`;
 function activate(name,focus=false) {
   if(!stages.includes(name))name='split-reads';active=name;
@@ -14,7 +16,7 @@ function activate(name,focus=false) {
   }
   history.replaceState(null,'',`#${name}`);
   if(focus)$(`tab-${name}`).focus();
-  requestAnimationFrame(()=>resize(name==='split-reads'?splitFrame:consensusFrame));
+  requestAnimationFrame(()=>resize(frames[name]));
 }
 function resize(frame) {
   const body=frame.contentDocument?.body;
@@ -25,20 +27,23 @@ for(const stage of stages) {
   $(`tab-${stage}`).onclick=()=>activate(stage);
   $(`tab-${stage}`).onkeydown=event=>{
     let target;
-    if(['ArrowLeft','ArrowRight'].includes(event.key))target=stages[1-stages.indexOf(stage)];
+    if(['ArrowLeft','ArrowRight'].includes(event.key))target=stages[(stages.indexOf(stage)+(event.key==='ArrowRight'?1:stages.length-1))%stages.length];
     if(event.key==='Home')target=stages[0];if(event.key==='End')target=stages[1];
     if(target) {event.preventDefault();activate(target,true);}
   };
 }
 window.addEventListener('hashchange',()=>activate(location.hash.slice(1)));
 function updateControls() {
-  const splitState=split()?.state,consensusState=consensus()?.state;
+  const splitState=split()?.state,consensusState=consensus()?.state,annotationState=annotation()?.state;
   const count=splitState?.files.length||0;
   $('selection-count').textContent=`${selected.size} / ${count} ファイル選択`;
   $('transfer-selected').disabled=transferring || !selected.size || !splitState || splitState.busy || !consensusState || consensusState.busy;
   $('open-consensus').disabled=!count;
+  $('open-annotation').disabled=!consensusState?.table || consensusState.busy;
+  $('transfer-consensus').disabled=!consensusState?.table || consensusState.busy || !annotationState || annotationState.busy;
+  $('consensus-output-summary').textContent=consensusState?.table?`${consensusState.table.name} · ${consensusState.table.representatives} 代表配列 · ${consensusState.table.samples} サンプル`:'get-consensusを実行すると、ここから集計表を渡せます。';
   for(const control of $('handoff-files').querySelectorAll('input,button'))control.disabled=transferring;
-  const jobs=[splitState?.busy?'split-reads処理中':'',consensusState?.busy?'get-consensus解析中':''].filter(Boolean);
+  const jobs=[splitState?.busy?'split-reads処理中':'',consensusState?.busy?'get-consensus解析中':'',annotationState?.busy?'分類解析中':''].filter(Boolean);
   $('workspace-status').textContent=jobs.length?jobs.join(' · '):count?`${count} サンプルの分割結果`:'入力待ち';
 }
 function refreshOutputs() {
@@ -86,9 +91,18 @@ $('transfer-selected').onclick=async()=>{
   } catch(error) {if(token===transferToken) {$('transfer-status').textContent=error.message;$('transfer-status').classList.add('error');}}
   finally {if(token===transferToken) {transferring=false;updateControls();}}
 };
-for(const [frame,event,refresh] of [[splitFrame,'nap:split-state',refreshOutputs],[consensusFrame,'nap:consensus-state',updateControls]]) {
+const transferConsensus=()=>{
+  try {
+    const exported=consensus().exportTable(consensus().state.revision);
+    annotation().setTable(exported.file,exported.provenance);
+    $('annotation-transfer-status').textContent='集計表を受け取りました。参照DBと条件を確認して「分類解析を開始」を押してください。';
+    $('annotation-transfer-status').classList.remove('error');activate('annotation');
+  } catch(error) {$('annotation-transfer-status').textContent=error.message;$('annotation-transfer-status').classList.add('error');}
+};
+$('transfer-consensus').onclick=transferConsensus;$('open-annotation').onclick=transferConsensus;
+for(const [frame,event,refresh] of [[splitFrame,'nap:split-state',refreshOutputs],[consensusFrame,'nap:consensus-state',updateControls],[annotationFrame,'nap:annotation-state',updateControls]]) {
   const connect=()=>{
-    if(!frame.contentWindow.napSplit && !frame.contentWindow.napConsensus) {
+    if(!frame.contentWindow.napSplit && !frame.contentWindow.napConsensus && !frame.contentWindow.napAnnotation) {
       frame.contentWindow.addEventListener('nap:ready',connect,{once:true});updateControls();return;
     }
     if(frame.contentDocument.body.dataset.napConnected)return;
@@ -100,4 +114,4 @@ for(const [frame,event,refresh] of [[splitFrame,'nap:split-state',refreshOutputs
   frame.addEventListener('load',connect);connect();
 }
 activate(location.hash.slice(1));
-window.nap={activateTab:activate,get state(){return {activeTab:active,selected:[...selected],split:split()?.state,consensus:consensus()?.state};}};
+window.nap={activateTab:activate,get state(){return {activeTab:active,selected:[...selected],split:split()?.state,consensus:consensus()?.state,annotation:annotation()?.state};}};

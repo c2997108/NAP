@@ -8,7 +8,10 @@
   "scripts": {
     "start": "node scripts/serve.mjs",
     "prepare:pages": "node scripts/prepare-pages.mjs",
-    "test": "node --test tests && node scripts/test-integration.mjs && node scripts/test-consensus-memory.mjs && node scripts/test-definition-editor.mjs && node scripts/test-service-worker.mjs --docs && node scripts/check-package.mjs",
+    "test": "node --test tests && node scripts/test-integration.mjs && node scripts/test-annotation.mjs && node scripts/test-consensus-memory.mjs && node scripts/test-definition-editor.mjs && node scripts/test-service-worker.mjs --docs && node scripts/check-package.mjs",
+    "prepare:annotation-db": "node scripts/prepare-annotation-db.mjs",
+    "test:annotation": "node scripts/test-annotation.mjs",
+    "test:annotation-full": "node scripts/test-annotation-native.mjs && node scripts/test-annotation.mjs --full-db",
     "test:consensus-memory": "node scripts/test-consensus-memory.mjs",
     "test:service-worker": "node scripts/test-service-worker.mjs",
     "test:pages": "node scripts/test-service-worker.mjs --docs",

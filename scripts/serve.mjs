@@ -20,8 +20,11 @@ export function createServer() {
       if(!['GET','HEAD'].includes(req.method)) {res.writeHead(405,{...headers,Allow:'GET, HEAD'}).end();return;}
       const pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
       const requested=pathname.endsWith('/')?pathname+'index.html':pathname;
-      const target=path.resolve(publicRoot,'.'+requested);
-      if(!target.startsWith(path.resolve(publicRoot)+path.sep)) {res.writeHead(403,headers).end('Forbidden');return;}
+      const annotationPrefix='/annotation/database/';
+      const servedRoot=requested.startsWith(annotationPrefix)?fileURLToPath(new URL('../data/annotation/',import.meta.url)):publicRoot;
+      const relative=requested.startsWith(annotationPrefix)?requested.slice(annotationPrefix.length):'.'+requested;
+      const target=path.resolve(servedRoot,relative);
+      if(!target.startsWith(path.resolve(servedRoot)+path.sep)) {res.writeHead(403,headers).end('Forbidden');return;}
       const info=await stat(target);
       if(info.isDirectory()) {res.writeHead(302,{...headers,Location:pathname+'/'}).end();return;}
       if(!info.isFile())throw Error('Not a file');

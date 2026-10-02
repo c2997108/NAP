@@ -53,10 +53,10 @@ try {
   assert.equal(initial.headers()['cross-origin-embedder-policy'], undefined);
   await page.waitForFunction(() => document.documentElement.dataset.napIsolation === 'preparing');
   assert.equal(await page.evaluate(() => document.querySelector('main').inert), true);
-  assert.deepEqual(await page.locator('iframe').evaluateAll(frames => frames.map(frame => frame.getAttribute('src'))), [null, null]);
+  assert.deepEqual(await page.locator('iframe').evaluateAll(frames => frames.map(frame => frame.getAttribute('src'))), [null, null, null]);
   assert.equal(await page.evaluate(() => !!window.nap), false);
   releaseWorker();
-  await page.waitForFunction(() => window.nap?.state.split && window.nap.state.consensus);
+  await page.waitForFunction(() => window.nap?.state.split && window.nap.state.consensus && window.nap.state.annotation);
   assert.equal(navigations.length, 2, 'Only one automatic reload on first startup');
   assert.equal(new URL(page.url()).hash, '#get-consensus');
   assert.equal(await page.evaluate(() => document.querySelector('main').inert), false);
@@ -68,8 +68,9 @@ try {
   assert.equal(registration.scope, base); assert.equal(registration.scriptURL, base + 'coi-serviceworker.js');
   const split = page.frames().find(frame => frame.url() === base + 'split-reads/');
   const consensus = page.frames().find(frame => frame.url() === base + 'get-consensus/');
-  assert.ok(split && consensus);
-  for (const frame of [page.mainFrame(), split, consensus]) {
+  const annotation = page.frames().find(frame => frame.url() === base + 'annotation/');
+  assert.ok(split && consensus && annotation);
+  for (const frame of [page.mainFrame(), split, consensus, annotation]) {
     assert.equal(await frame.evaluate(() => crossOriginIsolated && typeof SharedArrayBuffer === 'function'), true);
   }
   const served = await page.evaluate(async () => {
@@ -77,7 +78,7 @@ try {
     return { coop: response.headers.get('Cross-Origin-Opener-Policy'), coep: response.headers.get('Cross-Origin-Embedder-Policy') };
   });
   assert.deepEqual(served, { coop: 'same-origin', coep: 'require-corp' });
-  console.log(`PASS ${siteFolder}/ headerless /repo/ hosting: one startup reload, deferred inputs/iframes, parent and both frames isolated`);
+  console.log(`PASS ${siteFolder}/ headerless /repo/ hosting: one startup reload, deferred inputs/iframes, parent and all three frames isolated`);
 
   await page.getByRole('tab', { name: /split-reads/ }).click();
   await split.locator('#load-test').click();
@@ -100,6 +101,12 @@ try {
   assert.deepEqual(result.manifest.samples.map(sample => sample.assigned), [6, 6]);
   assert.deepEqual(result.sequences.sort(), expected.samples.map(sample => sample.sequence).sort());
   console.log('PASS actual BLAST split 12 reads -> VSEARCH/MAFFT/consensus -> two representatives without server isolation headers');
+  await page.locator('#open-annotation').click();
+  assert.match(await annotation.locator('#input-summary').textContent(),/get-consensusから受け取り/);
+  await annotation.locator('#demo').click();await annotation.locator('#start').click();
+  await annotation.waitForFunction(()=>!window.napAnnotation.state.busy && window.napAnnotation.result);
+  assert.equal(await annotation.evaluate(()=>window.napAnnotation.result.manifest.summary.annotated),2);
+  console.log('PASS annotation handoff and actual BLAST demo with project-subpath references on headerless hosting');
 
   await page.getByRole('tab', { name: /split-reads/ }).click(); await split.locator('#batch-size').fill('17');
   await page.evaluate(() => { window.napUpdateSentinel = 'keep'; });
@@ -118,13 +125,14 @@ try {
   assert.equal(await split.locator('#batch-size').inputValue(), '17');
   assert.equal(await split.evaluate(() => window.napSplit.state.files.length), 2);
   assert.equal(await consensus.evaluate(() => window.getConsensus.result.manifest.representatives), 2);
+  assert.equal(await annotation.evaluate(() => window.napAnnotation.result.manifest.summary.annotated),2);
   assert.deepEqual(errors, []); assert.deepEqual(httpErrors, []);
   assert.ok(requests.every(request => request.method === 'GET' && (request.url.startsWith(base) || request.url.startsWith('blob:'))), 'No uploads or external requests');
   await context.close();
   console.log('PASS worker update preserves draft inputs and split/consensus results, with no automatic reload');
 
   // Each direct entry point must bootstrap from a fresh browser with no worker.
-  for (const [route, ready] of [['get-consensus/', 'window.napConsensus'], ['get-consensus/tools.html', 'window.consensusTools'], ['split-reads/', 'window.napSplit']]) {
+  for (const [route, ready] of [['get-consensus/', 'window.napConsensus'], ['get-consensus/tools.html', 'window.consensusTools'], ['split-reads/', 'window.napSplit'], ['annotation/','window.napAnnotation']]) {
     const directContext = await browser.newContext(), direct = await directContext.newPage(), directErrors = [];
     direct.setDefaultTimeout(30000); let count = 0;
     direct.on('pageerror', error => directErrors.push(error.message));

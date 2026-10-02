@@ -73,7 +73,7 @@ async function finish(data,token,provenance) {
   viewer?.dispose();viewer=alignmentViewer($('#alignment'),alignments);
   result.files.set(CONSENSUS_RESULT_PAGE,new Blob([consensusResultPage(result,savedLog)],{type:'text/html;charset=utf-8'}));
   $('#outputs').replaceChildren();
-  for(const name of ['output-consensus.fastq','output-consensus.fasta','output-all-clusters.max.uc.fasta','all.cnt.txt','all.cnt.seq.qual.xlsx',CONSENSUS_RESULT_PAGE,'output-consensus-viewer.html','run.json','pipeline.log']) {
+  for(const name of ['output-consensus.fastq','output-consensus.fasta','output-all-clusters.max.uc.fasta','all.cnt.txt','all.cnt.seq.qual.txt','all.cnt.seq.qual.xlsx',CONSENSUS_RESULT_PAGE,'output-consensus-viewer.html','run.json','pipeline.log']) {
     const b=document.createElement('button');b.className='file-button';b.textContent=name;b.onclick=()=>download(name,result.files.get(name));$('#outputs').append(b);
   }
   $('#consensus-progress').value=1;$('#consensus-progress-value').textContent='100% · 完了';$('#consensus-progress').setAttribute('aria-valuetext','100% · 完了');
@@ -132,7 +132,11 @@ $('#zip').onclick=async()=>{
 if(!crossOriginIsolated) {status('解析環境の準備が完了していません。HTTPS または npm start でNAPを開き、ページを再読み込みしてください。');$('#status').classList.add('error');}
 filesChanged();window.getConsensus={get result(){return result;},get busy(){return busy;},
   get inputs(){return selected.slice();},
-  get state(){return {busy,files:selected.map(file=>({name:file.name,size:file.size})),provenance:inputProvenance};},
+  get state(){return {busy,revision:generation,files:selected.map(file=>({name:file.name,size:file.size})),provenance:inputProvenance,table:result?.files.has('all.cnt.seq.qual.txt')?{name:'all.cnt.seq.qual.txt',size:result.files.get('all.cnt.seq.qual.txt').size,representatives:result.rows.length,samples:result.names.length}:null};},
+  exportTable(revision=generation){
+    if(busy || !result || revision!==generation)throw Error('get-consensusの結果が更新されたか、解析中です。完了した結果を選び直してください。');
+    return {file:new File([result.files.get('all.cnt.seq.qual.txt')],'all.cnt.seq.qual.txt',{type:'text/plain'}),provenance:{application:'NAP',stage:'get-consensus',manifest:structuredClone(result.manifest)}};
+  },
   setFiles(files,provenance=null){chooseFiles(files,provenance);$('#files').value='';return selected.map(file=>file.name);},
 };
 window.napConsensus=window.getConsensus;notifyState();

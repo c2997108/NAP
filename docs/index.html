@@ -6,18 +6,19 @@
   <link rel="icon" href="data:,"><link rel="stylesheet" href="./nap.css">
 </head>
 <body>
-  <header class="app-header"><div class="brand"><span class="brand-mark">NAP</span><div><h1>Nanopore Amplicon Pipeline</h1><p>FASTQの分割から、コンセンサス配列まで。</p></div></div><span class="local-badge">● ブラウザ内で解析</span></header>
+  <header class="app-header"><div class="brand"><span class="brand-mark">NAP</span><div><h1>Nanopore Amplicon Pipeline</h1><p>FASTQの分割から、コンセンサス配列・分類まで。</p></div></div><span class="local-badge">● ブラウザ内で解析</span></header>
   <main>
     <div class="workspace-bar"><div class="tabs" role="tablist" aria-label="解析ステップ">
       <button id="tab-split-reads" role="tab" aria-selected="true" aria-controls="panel-split-reads"><span>01</span> split-reads</button>
       <button id="tab-get-consensus" role="tab" aria-selected="false" aria-controls="panel-get-consensus" tabindex="-1"><span>02</span> get-consensus <small id="output-count" hidden></small></button>
+      <button id="tab-annotation" role="tab" aria-selected="false" aria-controls="panel-annotation" tabindex="-1"><span>03</span> rRNA annotation</button>
     </div><p id="workspace-status" role="status" aria-live="polite">入力待ち</p></div>
     <section id="panel-split-reads" role="tabpanel" aria-labelledby="tab-split-reads">
       <div class="stage-heading"><div><h2>サンプルごとにFASTQを分割</h2><p>FASTQ、primer.fa、sample.txtを指定します。分割結果は次のタブへ渡せます。</p></div><button id="open-consensus" class="primary" disabled>分割結果を選んでget-consensusへ →</button></div>
       <iframe id="split-frame" data-src="./split-reads/" title="split-reads" allow="cross-origin-isolated"></iframe>
     </section>
     <section id="panel-get-consensus" role="tabpanel" aria-labelledby="tab-get-consensus" hidden>
-      <div class="stage-heading"><div><h2>選んだFASTQからコンセンサスを作成</h2><p>分割結果を渡すか、下のファイル選択欄から保存済みFASTQを読み込みます。</p></div></div>
+      <div class="stage-heading"><div><h2>選んだFASTQからコンセンサスを作成</h2><p>分割結果を渡すか、下のファイル選択欄から保存済みFASTQを読み込みます。</p></div><button id="open-annotation" class="primary" disabled>結果をrRNA annotationへ →</button></div>
       <section class="handoff-card" aria-labelledby="handoff-title">
         <div class="handoff-head"><h3 id="handoff-title">split-readsの分割結果</h3><span id="selection-count">0 ファイル選択</span></div>
         <p id="handoff-empty">split-readsで分割すると、ここにサンプル別FASTQが表示されます。</p>
@@ -27,6 +28,11 @@
         <div class="transfer-actions"><button id="transfer-selected" class="primary" disabled>選択したFASTQをget-consensusに渡す</button><p id="transfer-status" role="status" aria-live="polite">ダウンロード・再アップロードは不要です。受け渡し後に解析条件を確認して開始してください。</p></div>
       </section>
       <iframe id="consensus-frame" data-src="./get-consensus/" title="get-consensus" allow="cross-origin-isolated"></iframe>
+    </section>
+    <section id="panel-annotation" role="tabpanel" aria-labelledby="tab-annotation" hidden>
+      <div class="stage-heading"><div><h2>コンセンサス配列に分類情報を追加</h2><p>PortablePipelineのannotation~rRNA-for-metabarcodingを実行します。保存済みの集計表も読み込めます。</p></div></div>
+      <section class="handoff-card"><div class="handoff-head"><h3>get-consensusの結果</h3></div><p id="consensus-output-summary" class="session-note">get-consensusを実行すると、ここから集計表を渡せます。</p><div class="transfer-actions"><button id="transfer-consensus" class="primary" disabled>seq.qual.txtを分類解析に渡す</button><p id="annotation-transfer-status" role="status" aria-live="polite">受け渡し後に参照DBと解析条件を確認して開始してください。</p></div></section>
+      <iframe id="annotation-frame" data-src="./annotation/" title="rRNA annotation" allow="cross-origin-isolated"></iframe>
     </section>
     <p class="session-note">タブを切り替えても入力・結果・実行中の解析は保持されます。ページの再読み込み・終了で消えるため、結果は保存してください。</p>
   </main>

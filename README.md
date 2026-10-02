@@ -1,6 +1,6 @@
 # NAP — Nanopore Amplicon Pipeline
 
-Nanopore アンプリコンの FASTQ 分割とコンセンサス生成を、ブラウザ内で実行するアプリです。`split-reads` と `get-consensus` を別タブにまとめ、分割したサンプルの FASTQ を選んで、メモリー内で次の解析へ渡せます。
+Nanopore アンプリコンの FASTQ 分割、コンセンサス生成、参照データベースによる分類を、ブラウザ内で実行するアプリです。`split-reads`、`get-consensus`、`rRNA annotation` を別タブにまとめ、メモリー内で次の解析へ渡せます。
 
 リポジトリ: [c2997108/NAP](https://github.com/c2997108/NAP)
 
@@ -28,12 +28,59 @@ npm start
 4. サンプル別 FASTQ のチェックを選び、「選択したFASTQをget-consensusに渡す」を押します。名前による絞り込み、すべて選択、選択解除ができます。
 5. get-consensus の入力一覧と解析条件を確認し、「解析を開始」を押します。
 6. コンセンサス、サンプル別集計、アラインメントを確認し、ZIP / FASTA / FASTQ / Excel / HTML ビューアーを保存します。
+7. 「結果をrRNA annotationへ」を押すと、`all.cnt.seq.qual.txt` が分類タブに渡されます。参照DBと条件を確認して「分類解析を開始」を押します。
 
 受け渡しでは FASTQ の配列、品質値、ヘッダーをそのまま保持し、ファイルの保存・再選択は不要です。受け渡しだけでは解析を開始せず、解析条件も変更しません。保存済み FASTQ を get-consensus の入力欄から直接読み込むこともできます。1 FASTQ を 1 サンプルとして扱います。
 
 タブの切り替えで入力、結果、実行中の Worker は失われません。解析中は get-consensus の入力を上書きできません。split-reads を再実行・リセットすると選択一覧は更新されますが、既に渡した FASTQ とコンセンサス結果は保持されます。**ページの再読み込み・終了ではメモリー内の結果が消えます。保存してから閉じてください。**
 
 分割タブには、サンプル別 FASTQ だけをまとめる ZIP と、未分類リード・集計・判定座標などを含む ZIP の保存ボタンもあります。
+
+## rRNA annotation
+
+PortablePipelineの [annotation~rRNA-for-metabarcoding](https://github.com/c2997108/OpenPortablePipeline/blob/5c98917ecd94f807670e0537c8a63c5a0a048924/PortablePipeline/scripts/annotation~rRNA-for-metabarcoding) と、その呼び出し先のmetagenomeスクリプトを移植しています。get-consensusの入力配列・品質・カウントを保持し、`lca`、`top.taxpath`、`align.len`、`identity` を追加します。保存済みの `all.cnt.seq.qual.txt` を直接読み込むこともできます。
+
+既定のBLAST条件はmegablast、フィルターはbitscore 100以上・一致率90%以上・クエリー座標のアラインメント長100 bp以上・被覆率0%以上です。最初に条件を満たしたヒットのスコアに対する比率（既定値1）でLCA対象を選びます。内部コントロールは元スクリプトの配列を使用し、一致率80%以上・アラインメント長60 bp以上なら `internal_control` に上書きします。内部コントロール欄を空にするとこの検索を省略します。
+
+分類グループ表は元スクリプトと同じく **LCAと最上位ヒットの分類パスの組み合わせ**でカウントを合算します。分類なしの行は画面で `No Hit` と表示し、保存する分類列は空欄です。品質値は分類判定には使いません。
+
+異なる根の分類が混在する場合は葉緑体候補を優先し、葉緑体候補同士の共通祖先を使います。
+
+参照DBの指定方法は3通りです。
+
+- **準備済みのローカル統合DB**: 下記の準備コマンドで作った `data/annotation/` をローカル静的サーバーから読み込みます。
+- **参照DBフォルダーを選択**: `manifest.json` と分割したDBファイルを含むフォルダーを選びます。ファイルはブラウザ内で読み込みます。
+- **参照FASTA + 分類対応表**: FASTA（gzip可）と、`参照ID TAB 分類パス` の2列の `.path` / TSV（gzip可）を指定します。分類階層は `;` で区切ります。大きいFASTAは分割してBLAST DBを作り、順次検索します。「分類デモ」は合成配列・架空のDemo分類による動作確認用です。
+
+### コンテナ内の参照DBを用意する
+
+初回準備にはSSH、サーバー側のPodman・Python 3、ローカルのtarを使用します。解析の実行時にはこれらは不要です。
+
+```powershell
+npm run prepare:annotation-db
+```
+
+既定では `ssh m768` で接続し、既にインストールされている `docker.io/c2997108/centos7:2-blast-taxid-2-KronaTools-2.7-pr2-mito-silva-3` 内の `/usr/local/blastdb/mergedDB.maskadaptors.fa` と `.path` を使用します。この参照DBは2023年11月作成で、1,599,178配列・4,479,942,144塩基を含みます。利用したコンテナID・DB情報はマニフェストと各解析の `run.json` に記録します。ほかのホスト・コンテナを指定する場合は `npm run prepare:annotation-db -- ホスト名 イメージ名` とします。
+
+準備処理は元コンテナのデータを保持し、元FASTAタイトルの先頭にある配列名を使ってBLAST DB v4の小さいボリュームを作成し、gzipで保存します。現在のDBは36ボリューム、ローカル保存量は約904 MBです。`data/` はGitの管理対象外で、`docs/` の作成やGitHubへの公開には含めません。サーバー側の一時コピーの場所は `data/annotation/source-location.txt` に記録します。
+
+ブラウザは各ボリュームのSHA-256を確認し、1ボリュームずつ読み込んで使い終わったWorkerを終了します。全ボリュームのヒットを合わせてから500参照配列の上限・フィルター・LCAを適用します。`-dbsize` は全DBの塩基数を指定します。DB分割・BLASTのバージョン差により、E-valueや上限付近の同点ヒットの順序が元環境と異なる可能性があります。参照DB由来の2配列、内部コントロール、No Hit、短すぎる配列の計5配列で比較し、分類付き表と分類グループ表は元スクリプトの結果と一致しました。
+
+| 保存ファイル | 内容 |
+| --- | --- |
+| `all.cnt.seq.qual.tax.txt` | 元の配列・品質・サンプル別カウントに分類情報を追加 |
+| `all.cnt.seq.qual.tax.sp.txt` / `.xlsx` | 分類グループ別に合算したカウント表 |
+| `annotation-results.html` | 単独で開ける分類結果・集計表・実行条件のページ |
+| `blast.tsv` / `blast.filtered.tsv` | 全DBで上位500参照配列までのヒット / フィルター後のヒット |
+| `internalcontrol.blast.tsv` / `annotations.tsv` | 内部コントロールの検索結果 / 配列別分類情報 |
+| `all.cnt.seq.qual.txt` / `queries.fasta` | 解析に使用した入力表 / 検索配列 |
+| `run.json` / `pipeline.log` | 条件・参照DBの出所・実行記録 |
+
+```powershell
+npm run test:annotation
+# 実際のコンテナDBと元スクリプトの比較（m768へのSSH接続と準備済みDBが必要）
+npm run test:annotation-full
+```
 
 ## プライマー・サンプルの入力表
 

@@ -1,0 +1,15 @@
+{
+  "license": "MIT",
+  "files": {
+    "annotation-rrna.sh": {
+      "sha256": "52b80fa9b8755a9b15e73ed9e716d8ed59129449e3e4f37c079e2c0906de8a42",
+      "path": "PortablePipeline/scripts/annotation~rRNA-for-metabarcoding"
+    },
+    "metagenome-rrna-single-end.sh": {
+      "sha256": "f441c55b18906831450c74f731bbd3834139f4216ec229ca7c273a17f477b69e",
+      "path": "PortablePipeline/scripts/metagenome~silva-SSU-LSU_PR2_NCBI-mito-plastid_MitoFish_single-end"
+    }
+  },
+  "repository": "https://github.com/c2997108/OpenPortablePipeline",
+  "commit": "5c98917ecd94f807670e0537c8a63c5a0a048924"
+}

@@ -1,0 +1,16 @@
+import { makeZip } from '../../get-consensus/app/zip.mjs';
+const xml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&apos;' }[c])).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+function column(index) { let result = ''; for (index++; index; index = Math.floor((index - 1) / 26)) result = String.fromCharCode(65 + (index - 1) % 26) + result; return result; }
+export async function annotationWorkbook(result, warnings) {
+  const table = [['id','seq','qual','lca','top.taxpath','align.len','identity',...result.names], ...result.species.map(row => [row.id,row.seq,row.qual,row.annotation.lca,row.annotation.topTaxpath,row.annotation.length,row.annotation.identity,...row.counts])];
+  if (table.some(row => row.some(cell => typeof cell === 'string' && cell.length > 32767))) warnings.push('Excelのセル上限（32767文字）を超えた配列・品質の全文はall.cnt.seq.qual.tax.sp.txtに保存されています。');
+  const sheet = `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" state="frozen"/></sheetView></sheetViews><sheetData>${table.map((row, i) => `<row r="${i+1}">${row.map((cell, j) => typeof cell === 'number' ? `<c r="${column(j)}${i+1}"><v>${cell}</v></c>` : `<c r="${column(j)}${i+1}" t="inlineStr"><is><t xml:space="preserve">${xml(String(cell).length > 32767 ? '[全文はall.cnt.seq.qual.tax.sp.txtを参照]' : cell)}</t></is></c>`).join('')}</row>`).join('')}</sheetData><autoFilter ref="A1:${column(table[0].length-1)}${table.length}"/></worksheet>`;
+  const files = {
+    '[Content_Types].xml':'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+    '_rels/.rels':'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+    'xl/workbook.xml':'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Taxonomy counts" sheetId="1" r:id="rId1"/></sheets></workbook>',
+    'xl/_rels/workbook.xml.rels':'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
+    'xl/worksheets/sheet1.xml':sheet,
+  };
+  return new Blob([await makeZip(Object.entries(files).map(([name, text]) => ({ name, blob: new Blob([text]) })))], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}

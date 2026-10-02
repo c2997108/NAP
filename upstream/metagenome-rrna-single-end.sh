@@ -1,0 +1,208 @@
+#!/bin/bash
+
+explanation='
+Meta-barcoding metagenome analysis pipeline
+using SILVA SSU+LSU, PR2 database, NCBI mito & plastid database and MitoFish database
+'
+inputdef='
+input_1:directory:single-end FASTQ(.gz)/FASTA(.gz):*.fastq,*.fq,*.fastq.gz,*.fq.gz,*.fasta,*.fa,*.fasta.gz,*.fa.gz
+'
+optiondef='
+opt_c:cpu threads:8
+opt_m:memory limit (GB):32
+opt_b:blast option:
+opt_d:bit score threshold:100
+opt_a:Alignment percentage of aligned reads (%):0
+opt_l:Minimum alignment length (bp):100
+opt_i:Minimum alignment identity (%):90
+opt_t:Score from top of BLAST hits used in LCA:0.95
+opt_s:Divide FASTQ by this number of reads:10000
+opt_g:read number for normalization:10000
+'
+runcmd="$0 -c #opt_c# -m #opt_m# -b #opt_b# -d #opt_d# -a #opt_a# -l #opt_l# -i #opt_i# -t #opt_t# -s #opt_s# -g #opt_g# #input_1#"
+
+export IM_BLAST="c2997108/ppmultiarch:blast_seqkit_1-metasearchdb"
+export IM_KRONA="c2997108/biocontainers:krona_2.8.1"
+export IM_BASE="c2997108/ppmultiarch:yoshitake_merge"
+
+source "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/common.sh"
+
+set -eux
+set -o pipefail
+
+
+cat << 'EOS' > run-split.sh
+set -ex
+i="$1"
+nmaxreads="$2"
+seqkit stats -T "$i" > "$i".stats
+n=`tail -n 1 "$i".stats|awk -F'\t' -v nmaxreads=$nmaxreads '{print int($4/nmaxreads)}'`
+#基本的にはnmaxreadsリードずつに分割するけど、1万個以上に分割しそうなときは1万個までに分割するための措置
+if [ $n -lt 10000 ]; then nreads=$nmaxreads; else nreads=`tail -n 1 "$i".stats|awk -F'\t' '{print int($4/10000)}'`; fi
+pp_k=()
+while IFS= read -r pp_line; do pp_k+=("$pp_line"); done < <(echo "$i"|grep -E "[.]f(ast|)q([.]gz|)$"||true)
+for k in ${pp_k[@]+"${pp_k[@]}"}; do
+ j=`basename "$k"|sed 's/q[.]gz$/a.gz/; s/q$/a/'`
+ seqkit fq2fa -o fq2fa/"$j" "$k"
+ i=fq2fa/"$j"
+done
+seqkit split2 -s $nreads -e .gz -O "split/$(basename "$i")" "$i"
+
+EOS
+
+mkdir -p fq2fa
+pp_files=()
+while IFS= read -r pp_line; do pp_files+=("$pp_line"); done < <(find "$input_1"/|grep -E "[.]f(ast|)(a|q)([.]gz|)$"||true)
+(for i in ${pp_files[@]+"${pp_files[@]}"}; do
+ echo "$ENV_BLAST bash run-split.sh $(pp_shell_quote "$i") $opt_s"
+done)|DOPARALLELONE
+
+WAITPARALLEL
+
+rm -rf fq2fa
+
+cat << 'EOS' > run-blast.sh
+i="$1"
+bitscore="$2"
+top="$3"
+blastop="$5"
+cpu="$4"
+alignpercent="$6" #0
+alignlength="$8" #100
+identity="$7" #90
+
+ref=/usr/local/blastdb/mergedDB.maskadaptors.fa
+
+set -ex
+
+echo "##count reads"
+n0=`zcat "$i"|grep "^>"|wc -l`
+
+j="$i"
+
+echo "##blast"
+zcat "$j"|blastn -db "$ref" -query /dev/stdin -outfmt 6 -out "$j.blast" -num_threads $cpu $blastop
+echo "blast status: " $?
+
+echo "##filtering"
+seqkit fx2tab "$j" | awk -F'\t' -v bitscore="$bitscore" -v top="$top" -v alignpercent="$alignpercent" -v alignlength="$alignlength" -v identity="$identity" '
+  FILENAME==ARGV[1]{split($1,arr," "); len[arr[1]]=length($(NF-1))}
+  FILENAME==ARGV[2]{if($12>=bitscore&&$3>=identity&&($8-$7+1>=alignlength)&&($8-$7+1>=len[$1]*alignpercent/100)){if(a[$1]==1){if($12>=topbit*top){print $0}}else{a[$1]=1; topbit=$12; print $0}}}
+ ' /dev/stdin "$j.blast" > "$j.blast.filtered"
+
+echo "##determine LCA"
+#blast実行時に配列名の最後が「.」の場合削られるなどヒットした配列名が元の名前から変わるので注意
+awk -F'\t' 'FILENAME==ARGV[1]{name[$1]=$2} FILENAME==ARGV[2]{print name[$2]"\t"$0}' "$ref.path" "$j.blast.filtered" > "$j.blast.filtered.name"
+
+awk -F'\t' '
+function searchLCA(data,  i, j, res, res2, str, n, stopflag){
+ for(i in data){
+  if(n==0){n=split(i,res,";")}
+  else{split(i,res2,";"); for(j in res){if(res[j]!=res2[j]){res[j]=""}}}
+ }
+ if(res[1]!=""){str=res[1]}
+ else{
+  #i: taxonomy path
+  #葉緑体と植物の18Sは相同性が高いみたいなのでそれが混ざるときは葉緑体を優先させる
+  chloroplast=0
+  delete datachloro
+  for(i in data){
+   if(i~"^Bacteria;Cyanobacteria;Cyanobacteriia;Chloroplast;"){chloroplast++; datachloro[i]=1}
+  }
+  if(chloroplast>0){
+   n2=0
+   for(i in datachloro){
+    if(n2==0){n2=split(i,res,";")}
+    else{split(i,res2,";"); for(j in res){if(res[j]!=res2[j]){res[j]=""}}}
+   }
+  }
+ }
+ if(res[1]!=""){str=res[1]}
+ else{
+  str="unknown"; stopflag=1
+ };
+ for(i=2;i<=n;i++){if(stopflag==0 && res[i]!=""){str=str";"res[i]}else{stopflag=1}}
+ return str;
+}
+{
+ if($2!=old){if(old!=""){print searchLCA(data)"\t"oldstr}; delete data; data[$1]=1; old=$2; oldstr=$0}
+ else{data[$1]=1}
+}
+END{if(length(data)>0){print searchLCA(data)"\t"oldstr}}
+' "$j.blast.filtered.name" > "$j.blast.filtered.name.lca"
+
+awk -F'\t' '{cnt[$1]++} END{PROCINFO["sorted_in"]="@val_num_desc"; for(i in cnt){print i"\t"cnt[i]}}' "$j.blast.filtered.name.lca" > "$j.blast.filtered.name.lca.cnt"
+awk -F'\t' '{print "root;"$0}' "$j.blast.filtered.name.lca.cnt" > "$j.blast.filtered.name.lca.cnt2"
+cnt=`awk -F'\t' '{a+=$2} END{if(a==""){a=0}; print a}' "$j.blast.filtered.name.lca.cnt"`
+echo -e "No Hit\t"`expr $n0 - $cnt` >> "$j.blast.filtered.name.lca.cnt2"
+
+EOS
+
+
+pp_parts=()
+while IFS= read -r pp_line; do pp_parts+=("$pp_line"); done < <(find split -mindepth 2 -maxdepth 2|grep -E "[.]part_[0-9]*[.](fasta|fa)[.]gz$")
+if [ ${#pp_parts[@]} = 0 ]; then false; fi
+for i in ${pp_parts[@]+"${pp_parts[@]}"}; do
+ echo "$ENV_BLAST bash run-blast.sh $(pp_shell_quote "$i") $opt_d $opt_t $N_CPU '$opt_b' $opt_a $opt_i $opt_l"
+done|DOPARALLEL
+
+WAITPARALLEL
+
+mkdir -p result result.temp
+for i in split/*; do
+ #入力ファイル名がカウント表(all.counts*.txt/xlsx)の列見出し＝サンプル名になるので識別子として畳む(result/のファイル名は変えない)
+ (echo -e "id\t$(pp_safe_name "$(basename "$i")")"; awk -F'\t' '{data[$1]+=$2} END{PROCINFO["sorted_in"]="@val_type_desc"; for(i in data){print i"\t"data[i]}}' "$i"/*.cnt2) > "result/$(basename "$i").tsv"
+ tail -n+2 "result/$(basename "$i").tsv"|awk -F'\t' '
+  {n=split($1,arr,";"); ORS="\t"; print $2; for(i=1;i<n;i++){print arr[i]}; ORS="\n"; print arr[n]}
+ ' > "result.temp/$(basename "$i")"
+done
+DO_KRONA ktImportText result.temp/* -o all.html
+rm -rf result.temp
+
+if [ `ls result/*.tsv|wc -l` -gt 1 ]; then
+ DO_BASE merge_table.pl -k result/*.tsv|sed 's/\t\t/\t0\t/g; s/\t\t/\t0\t/g; s/\t$/\t0/' > all.counts.txt
+else
+ cp result/*.tsv all.counts.txt
+fi
+DO_BASE awk -F'\t' '
+ FILENAME==ARGV[1]{if(FNR>1){for(i=2;i<=NF;i++){a[i]+=$i}}}
+ FILENAME==ARGV[2]{if(FNR==1){OFS="\t"; for(i=2;i<=NF;i++){$i=$i" (counts per '$opt_g')"; if(a[i]==0){a[i]=1}}; print $0}
+                   else{ORS=""; print $1;for(i=2;i<=NF;i++){print "\t"$i/a[i]*'$opt_g'}; print "\n"}}
+' all.counts.txt ./all.counts.txt > all.counts.per.$opt_g.txt
+DO_BASE java -Xmx1G -jar /usr/local/bin/excel2.jar all.counts.txt all.counts.xlsx
+DO_BASE java -Xmx1G -jar /usr/local/bin/excel2.jar all.counts.per.$opt_g.txt all.counts.per.$opt_g.xlsx
+
+
+post_processing
+#<option detail>
+#<opt_b>
+USAGE
+  blastn [-h] [-help] [-import_search_strategy filename]
+    [-export_search_strategy filename] [-task task_name] [-db database_name]
+    [-dbsize num_letters] [-gilist filename] [-seqidlist filename]
+    [-negative_gilist filename] [-entrez_query entrez_query]
+    [-db_soft_mask filtering_algorithm] [-db_hard_mask filtering_algorithm]
+    [-subject subject_input_file] [-subject_loc range] [-query input_file]
+    [-out output_file] [-evalue evalue] [-word_size int_value]
+    [-gapopen open_penalty] [-gapextend extend_penalty]
+    [-perc_identity float_value] [-qcov_hsp_perc float_value]
+    [-max_hsps int_value] [-xdrop_ungap float_value] [-xdrop_gap float_value]
+    [-xdrop_gap_final float_value] [-searchsp int_value]
+    [-sum_stats bool_value] [-penalty penalty] [-reward reward] [-no_greedy]
+    [-min_raw_gapped_score int_value] [-template_type type]
+    [-template_length int_value] [-dust DUST_options]
+    [-filtering_db filtering_database]
+    [-window_masker_taxid window_masker_taxid]
+    [-window_masker_db window_masker_db] [-soft_masking soft_masking]
+    [-ungapped] [-culling_limit int_value] [-best_hit_overhang float_value]
+    [-best_hit_score_edge float_value] [-window_size int_value]
+    [-off_diagonal_range int_value] [-use_index boolean] [-index_name string]
+    [-lcase_masking] [-query_loc range] [-strand strand] [-parse_deflines]
+    [-outfmt format] [-show_gis] [-num_descriptions int_value]
+    [-num_alignments int_value] [-line_length line_length] [-html]
+    [-max_target_seqs num_sequences] [-num_threads int_value] [-remote]
+    [-version]
+
+#</opt_b>
+#</option detail>
+
