@@ -11,3 +11,4 @@ for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses']) {
   await cp(path.join(root, name), path.join(destination, name), { recursive: true, force: true });
 }
 console.log('NAP: public/ を docs/ にコピーしました。GitHub Pagesで公開ブランチの /docs を指定できます。');
+if (process.argv.includes('--with-annotation-db')) await import('./prepare-pages-db.mjs');

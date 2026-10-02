@@ -33,7 +33,7 @@ export async function runAnnotation(input, { tools = new ConsensusTools(), onPro
     } else {
       const url = new URL('../database/manifest.json', import.meta.url);
       const response = await fetch(url, { signal });
-      if (!response.ok) throw Error('ローカル参照DBが準備されていません。npm run prepare:annotation-db を実行するか、参照DBフォルダー / FASTAを指定してください。');
+      if (!response.ok) throw Error('準備済みの統合DBを読み込めません。ローカルでは npm run prepare:annotation-db、GitHub Pages用には npm run prepare:pages:db でDBを用意するか、参照DBフォルダー / FASTAを指定してください。');
       manifest = validateManifest(await response.json()); source = { baseUrl: url.href };
     }
     info = { name: manifest.database, mode: input.mode, totalBases: manifest.totalBases, sequences: manifest.sequences, source: manifest.source, volumes: manifest.shards.length };

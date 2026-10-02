@@ -88,8 +88,8 @@ function checkReference(file,specifier,html=false) {
   if(!specifier.startsWith('.'))return;
   const target=fileURLToPath(new URL(specifier,pathToFileURL(file)));
   let name=relative(target).split(/[?#]/)[0];
-  // This optional DB is mounted from ignored data/ by the local server and can
-  // also be supplied through the browser folder/FASTA inputs. It is not bundled.
+  // The local server mounts this route from ignored data/. The Pages copy is
+  // packaged separately under docs/annotation/database/ and checked below.
   if(name==='public/annotation/database/manifest.json')return;
   if(!html && specifier.endsWith('/')) {
     assert.ok([...names].some(file=>file.startsWith(name.replace(/\/$/,'')+'/')),`Missing packaged directory (case-sensitive): ${name}`);
@@ -113,6 +113,15 @@ for(const file of files.filter(file=>relative(file).startsWith('public/'))) {
 const sizes=await Promise.all(files.map(async file=>({name:relative(file),bytes:(await stat(file)).size})));
 sizes.sort((a,b)=>b.bytes-a.bytes);
 assert.ok(sizes.every(file=>file.bytes<100*1024*1024),'Keep every distributable file below 100 MiB');
+const pagesBytes=sizes.filter(file=>file.name.startsWith('docs/')).reduce((total,file)=>total+file.bytes,0);
+assert.ok(pagesBytes<=1_000_000_000,`GitHub Pages site exceeds 1 GB: ${pagesBytes} bytes`);
+if(names.has('docs/annotation/database/manifest.json')) {
+  const {validateManifest}=await import('../public/annotation/app/reference.mjs');
+  const manifest=validateManifest(await readJson('docs/annotation/database/manifest.json'));
+  const specs=[manifest.taxonomy,...manifest.shards.flatMap(shard=>shard.files)];
+  for(const spec of specs)await check(path.join(root,'docs/annotation/database',spec.url),{sha256:spec.sha256,bytes:spec.packedBytes});
+  assert.equal(specs.reduce((total,spec)=>total+spec.packedBytes,0),manifest.distribution.packedBytes,'Published DB transfer size');
+}
 const expected=await readJson('public/examples/expected.json');
 assert.equal(expected.inputReads,12);assert.equal(expected.samples.length,2);
 for(const sample of expected.samples)assert.equal(digest(sample.sequence),sample.sha256);
@@ -120,7 +129,7 @@ const pkg=await readJson('package.json'),lock=await readJson('package-lock.json'
 assert.equal(pkg.version,lock.version);assert.equal(pkg.name,lock.name);
 assert.equal(pkg.devDependencies.playwright,lock.packages['node_modules/playwright'].version);
 const report={checkedAt:new Date().toISOString(),files:files.length,verifiedHashes:verified,
-  checkedReferences:references,pagesFiles,totalBytes:sizes.reduce((sum,file)=>sum+file.bytes,0),largest:sizes.slice(0,4)};
+  checkedReferences:references,pagesFiles,pagesBytes,totalBytes:sizes.reduce((sum,file)=>sum+file.bytes,0),largest:sizes.slice(0,4)};
 await mkdir(path.join(root,'test-results'),{recursive:true});
 await writeFile(path.join(root,'test-results/package-report.json'),JSON.stringify(report,null,2)+'\n');
-console.log(`PASS standalone package: ${report.files} files, ${verified} hashes, ${references} relative references, ${pagesFiles} matching Pages assets (${(report.totalBytes/1024/1024).toFixed(1)} MiB)`);
+console.log(`PASS standalone package: ${report.files} files, ${verified} hashes, ${references} relative references, ${pagesFiles} matching Pages assets (${(report.totalBytes/1024/1024).toFixed(1)} MiB; Pages ${(pagesBytes/1_000_000).toFixed(1)} MB / 1,000 MB)`);

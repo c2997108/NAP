@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node scripts/serve.mjs",
     "prepare:pages": "node scripts/prepare-pages.mjs",
+    "prepare:pages:db": "node scripts/prepare-pages.mjs --with-annotation-db",
     "test": "node --test tests && node scripts/test-integration.mjs && node scripts/test-annotation.mjs && node scripts/test-consensus-memory.mjs && node scripts/test-definition-editor.mjs && node scripts/test-service-worker.mjs --docs && node scripts/check-package.mjs",
     "prepare:annotation-db": "node scripts/prepare-annotation-db.mjs",
     "test:annotation": "node scripts/test-annotation.mjs",

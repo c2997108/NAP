@@ -74,6 +74,10 @@ $('start').onclick = () => {
   } catch (error) { status(error.message,true); }
 };
 $('cancel').onclick = () => { $('cancel').disabled = true; status('分類解析を中止しています…'); worker?.postMessage({cancel:true}); };
+$('save-xlsx').onclick = () => {
+  const name = 'all.cnt.seq.qual.tax.sp.xlsx', blob = result?.files.get(name);
+  if (blob) download(name, blob);
+};
 $('zip').onclick = async () => {
   $('zip').disabled = true;
   try { download('annotation-results.zip', await makeZip([...result.files].map(([name,blob]) => ({ name,blob })))); }

@@ -48,7 +48,7 @@ PortablePipelineの [annotation~rRNA-for-metabarcoding](https://github.com/c2997
 
 参照DBの指定方法は3通りです。
 
-- **準備済みのローカル統合DB**: 下記の準備コマンドで作った `data/annotation/` をローカル静的サーバーから読み込みます。
+- **準備済みのローカル統合DB**: ローカルサーバーでは `data/annotation/`、GitHub Pagesでは同梱した `docs/annotation/database/` を自動で読み込みます。公開ページではファイル選択が不要です。
 - **参照DBフォルダーを選択**: `manifest.json` と分割したDBファイルを含むフォルダーを選びます。ファイルはブラウザ内で読み込みます。
 - **参照FASTA + 分類対応表**: FASTA（gzip可）と、`参照ID TAB 分類パス` の2列の `.path` / TSV（gzip可）を指定します。分類階層は `;` で区切ります。大きいFASTAは分割してBLAST DBを作り、順次検索します。「分類デモ」は合成配列・架空のDemo分類による動作確認用です。
 
@@ -62,7 +62,18 @@ npm run prepare:annotation-db
 
 既定では `ssh m768` で接続し、既にインストールされている `docker.io/c2997108/centos7:2-blast-taxid-2-KronaTools-2.7-pr2-mito-silva-3` 内の `/usr/local/blastdb/mergedDB.maskadaptors.fa` と `.path` を使用します。この参照DBは2023年11月作成で、1,599,178配列・4,479,942,144塩基を含みます。利用したコンテナID・DB情報はマニフェストと各解析の `run.json` に記録します。ほかのホスト・コンテナを指定する場合は `npm run prepare:annotation-db -- ホスト名 イメージ名` とします。
 
-準備処理は元コンテナのデータを保持し、元FASTAタイトルの先頭にある配列名を使ってBLAST DB v4の小さいボリュームを作成し、gzipで保存します。現在のDBは36ボリューム、ローカル保存量は約904 MBです。`data/` はGitの管理対象外で、`docs/` の作成やGitHubへの公開には含めません。サーバー側の一時コピーの場所は `data/annotation/source-location.txt` に記録します。
+準備処理は元コンテナのデータを保持し、元FASTAタイトルの先頭にある配列名を使ってBLAST DB v4の小さいボリュームを作成し、gzipで保存します。現在のDBは36ボリューム、ローカル保存量は約904 MBです。元の `data/` はGitの管理対象外です。サーバー側の一時コピーの場所は `data/annotation/source-location.txt` に記録します。
+
+GitHub Pages用の統合DBを作り直す場合は、ローカルDBを用意してから次を実行します。
+
+```powershell
+npm run prepare:pages:db
+npm run check:package
+```
+
+公開用コピーだけをgzipレベル9で再圧縮し、`docs/annotation/database/` に配置します。元のDBを変更せず、入力のSHA-256と展開サイズを確認し、公開ファイルのSHA-256・展開後のSHA-256・転送サイズをマニフェストに記録します。公開DBは約875 MB、`docs/` 全体は約976 MBです。[GitHub Pagesの上限1 GB](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)とGitの単一ファイル上限100 MiBを確認してからコピーします。公開DBはGit管理対象なので、更新した `docs/` をpushすると公開ページに反映されます。
+
+分類解析では36分割と分類対応表を順に読み込みます。DB全体の転送量は約875 MBです。DBは入力表やFASTQの指定前には読み込まず、ユーザーの配列をサーバーへ送る処理もありません。Service Workerによる永続保存は追加していないため、再実行時の再ダウンロードはブラウザのHTTPキャッシュに依存します。
 
 ブラウザは各ボリュームのSHA-256を確認し、1ボリュームずつ読み込んで使い終わったWorkerを終了します。全ボリュームのヒットを合わせてから500参照配列の上限・フィルター・LCAを適用します。`-dbsize` は全DBの塩基数を指定します。DB分割・BLASTのバージョン差により、E-valueや上限付近の同点ヒットの順序が元環境と異なる可能性があります。参照DB由来の2配列、内部コントロール、No Hit、短すぎる配列の計5配列で比較し、分類付き表と分類グループ表は元スクリプトの結果と一致しました。
 
@@ -266,17 +277,19 @@ Edge では `$env:BROWSER_CHANNEL='msedge'; npm test`。Playwright Chromium を�
 ```text
 NAP (Nanopore Amplicon Pipeline)/
 ├── public/
-│   ├── index.html, nap.mjs, nap.css  # 2 タブと FASTQ 受け渡し
+│   ├── index.html, nap.mjs, nap.css  # 3 タブと解析結果の受け渡し
 │   ├── bootstrap.mjs, isolation.mjs # 解析環境の準備と初回起動制御
 │   ├── coi-serviceworker.js         # ヘッダーなしの配信向け補助
 │   ├── split-reads/                 # 分割アプリと Worker
 │   ├── get-consensus/               # コンセンサスアプリと WASM
 │   │   └── sources/                 # WASM の対応ソースアーカイブ
+│   ├── annotation/                  # BLASTによる分類・LCAと集計
 │   ├── shared/wasm/                 # 両アプリ共通の NCBI BLAST
 │   └── examples/                    # 合成入力のみ
 ├── docs/                            # GitHub Pages公開一式と参考資料
 │   ├── index.html, .nojekyll
 │   ├── split-reads/, get-consensus/, shared/, examples/
+│   ├── annotation/database/         # 公開用の統合参照DB
 │   └── coi-serviceworker.js         # public/と同じ解析環境の補助
 ├── scripts/                         # サーバー、公開用コピー、テスト、デモ生成
 ├── upstream/                        # 固定版の元スクリプトと出典
@@ -309,7 +322,9 @@ npm run prepare:pages
 
 このコマンドで `public/` の中身を `docs/` 直下にコピーします。HTML・JavaScript・CSS・WASM・Worker・合成デモ・対応ソースアーカイブ・ライセンスを含みます。`docs/.nojekyll` によりJekyll処理を無効にし、`vendor/` などもそのまま配信します。`public/` を編集した後は、pushする前にもう一度実行してください。`docs/` はGitの管理対象です。
 
-GitHub側では **Settings → Pages → Source: Deploy from a branch → 公開ブランチ（例: main）→ /docs → Save** を選択します。公開URLは通常 `https://ユーザー名.github.io/リポジトリ名/` です。URLに `/docs/` は付きません。このNAPフォルダーをリポジトリのルートにして配置してください。GitHub Actionsを公開元にする場合は `public/` をアップロードする方式も使えます。
+`npm run prepare:pages` は既存の公開用DBを保持します。DBも更新する場合は `npm run prepare:pages:db` を使います。GitHub Pagesで「準備済みのローカル統合DB」を使用するには、`docs/annotation/database/` も公開に含めてください。
+
+GitHub側では **Settings → Pages → Source: Deploy from a branch → 公開ブランチ（例: main）→ /docs → Save** を選択します。公開URLは通常 `https://ユーザー名.github.io/リポジトリ名/` です。URLに `/docs/` は付きません。このNAPフォルダーをリポジトリのルートにして配置してください。GitHub Actionsを公開元にする場合も、統合DBを含む `docs/` をアップロードしてください。
 
 - 初回は「ブラウザの解析環境を準備しています…」と表示し、入力前に一度だけ自動再読み込みします。準備が終わってから入力表と解析画面を有効にします。
 - トップ画面、split-reads単独画面、get-consensus単独画面、ツール単体画面に対応します。
