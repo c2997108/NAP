@@ -2,23 +2,12 @@
 
 Nanopore アンプリコンの FASTQ 分割、コンセンサス生成、参照データベースによる分類を、ブラウザ内で実行するアプリです。`split-reads`、`get-consensus`、`rRNA annotation` を別タブにまとめ、メモリー内で次の解析へ渡せます。
 
-リポジトリ: [c2997108/NAP](https://github.com/c2997108/NAP)
+公開WEBページ： https://c2997108.github.io/NAP/
 
 基になった処理は OpenPortablePipeline の [nanopore~split-barcode](https://github.com/c2997108/OpenPortablePipeline/blob/53c159aeedff6038f0fe5ab032bdd4f064067483/PortablePipeline/scripts/nanopore~split-barcode) と [nanopore~get-consensus](https://github.com/c2997108/OpenPortablePipeline/blob/53c159aeedff6038f0fe5ab032bdd4f064067483/PortablePipeline/scripts/nanopore~get-consensus) です。NCBI BLAST、MAFFT、VSEARCH、CD-HIT、minimap2、samtools を WebAssembly で実行します。
 
-## 起動
-
-Node.js 18 以降と Chrome / Edge を使用します。ビルド済み WASM を同梱しているため、解析時に Docker、WSL、Python、Java は不要です。
-
-```powershell
-cd "NAP (Nanopore Amplicon Pipeline)"
-npm ci
-npm start
-```
-
-[http://localhost:8002/](http://localhost:8002/) を開きます。別ポートを使う場合は PowerShell で `$env:PORT='8010'; npm start`、Bash で `PORT=8010 npm start` とします。起動だけなら `npm ci` は省略できます。依存パッケージは開発用ブラウザテストに使います。
-
-サーバーはローカルの静的ファイルを配信するだけです。入力データのアップロード、外部 API、CDN は使用しません。解析は Web Worker とブラウザのメモリー内で行います。
+アルゴリズムは以下の論文で説明。
+https://www.biorxiv.org/content/10.64898/2026.09.08.750005v1
 
 ## 分割からコンセンサスまで
 
@@ -51,6 +40,20 @@ PortablePipelineの [annotation~rRNA-for-metabarcoding](https://github.com/c2997
 - **準備済みのローカル統合DB**: ローカルサーバーでは `data/annotation/`、GitHub Pagesでは同梱した `docs/annotation/database/` を自動で読み込みます。公開ページではファイル選択が不要です。
 - **参照DBフォルダーを選択**: `manifest.json` と分割したDBファイルを含むフォルダーを選びます。ファイルはブラウザ内で読み込みます。
 - **参照FASTA + 分類対応表**: FASTA（gzip可）と、`参照ID TAB 分類パス` の2列の `.path` / TSV（gzip可）を指定します。分類階層は `;` で区切ります。大きいFASTAは分割してBLAST DBを作り、順次検索します。「分類デモ」は合成配列・架空のDemo分類による動作確認用です。
+
+## 起動
+
+Node.js 18 以降と Chrome / Edge を使用します。ビルド済み WASM を同梱しているため、解析時に Docker、WSL、Python、Java は不要です。
+
+```powershell
+cd "NAP (Nanopore Amplicon Pipeline)"
+npm ci
+npm start
+```
+
+[http://localhost:8002/](http://localhost:8002/) を開きます。別ポートを使う場合は PowerShell で `$env:PORT='8010'; npm start`、Bash で `PORT=8010 npm start` とします。起動だけなら `npm ci` は省略できます。依存パッケージは開発用ブラウザテストに使います。
+
+サーバーはローカルの静的ファイルを配信するだけです。入力データのアップロード、外部 API、CDN は使用しません。解析は Web Worker とブラウザのメモリー内で行います。
 
 ### コンテナ内の参照DBを用意する
 
