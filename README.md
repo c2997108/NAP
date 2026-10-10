@@ -4,6 +4,8 @@ Nanopore アンプリコンの FASTQ 分割、コンセンサス生成、参照�
 
 公開WEBページ： https://c2997108.github.io/NAP/
 
+画面上部のアプリ名の横に、現在表示しているNAPのバージョン番号とビルドIDを表示します。番号は `package.json` の `version`、ビルドIDは配布ファイルの内容から生成するため、同じ番号でも更新された画面を識別できます。`npm start` と `npm run prepare:pages` で自動更新され、GitHub Pagesにも同じ表示が含まれます。
+
 基になった処理は OpenPortablePipeline の [nanopore~split-barcode](https://github.com/c2997108/OpenPortablePipeline/blob/53c159aeedff6038f0fe5ab032bdd4f064067483/PortablePipeline/scripts/nanopore~split-barcode) と [nanopore~get-consensus](https://github.com/c2997108/OpenPortablePipeline/blob/53c159aeedff6038f0fe5ab032bdd4f064067483/PortablePipeline/scripts/nanopore~get-consensus) です。NCBI BLAST、MAFFT、VSEARCH、CD-HIT、minimap2、samtools を WebAssembly で実行します。
 
 アルゴリズムは以下の論文で説明。

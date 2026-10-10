@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeVersion } from './write-version.mjs';
 
 export const publicRoot=fileURLToPath(new URL('../public/',import.meta.url));
 const types={'.html':'text/html; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.wasm':'application/wasm','.json':'application/json','.txt':'text/plain; charset=utf-8','.fa':'text/plain; charset=utf-8','.fastq':'text/plain; charset=utf-8','.gz':'application/gzip'};
@@ -34,6 +35,7 @@ export function createServer() {
   });
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)) {
+  await writeVersion();
   const port=Number(process.env.PORT||8002);
   const server=createServer();
   server.on('error',error=>{console.error(`NAP: ${error.message}`);process.exitCode=1;});

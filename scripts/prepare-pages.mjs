@@ -1,9 +1,11 @@
 import { cp, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeVersion } from './write-version.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const destination = path.join(root, 'docs');
+await writeVersion();
 await mkdir(destination, { recursive: true });
 await cp(path.join(root, 'public'), destination, { recursive: true, force: true });
 await writeFile(path.join(destination, '.nojekyll'), '');

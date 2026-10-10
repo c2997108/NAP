@@ -26,7 +26,7 @@ const requireFile=name=>assert.ok(names.has(name),`Missing packaged file (case-s
 for(const name of ['README.md','LICENSE','THIRD_PARTY_NOTICES.md','sources/README.md',
   'licenses/VARSCAN-LICENSE.txt','upstream/LICENSE','upstream/provenance.json',
   'package.json','package-lock.json','.gitignore','.gitattributes','.github/workflows/test.yml',
-  'scripts/serve.mjs','scripts/prepare-pages.mjs','scripts/test-integration.mjs','scripts/test-service-worker.mjs','public/index.html','public/nap.mjs',
+  'scripts/serve.mjs','scripts/prepare-pages.mjs','scripts/write-version.mjs','scripts/test-integration.mjs','scripts/test-service-worker.mjs','public/index.html','public/nap.mjs',
   'public/bootstrap.mjs','public/isolation.mjs','public/coi-serviceworker.js',
   'public/coi-serviceworker-LICENSE.txt','public/coi-serviceworker.manifest.json',
   'public/nap.css','public/engine.css','public/split-reads/index.html','public/get-consensus/index.html','public/annotation/index.html','public/annotation/app/core.mjs','public/annotation/app/pipeline.mjs',
@@ -127,6 +127,9 @@ assert.equal(expected.inputReads,12);assert.equal(expected.samples.length,2);
 for(const sample of expected.samples)assert.equal(digest(sample.sequence),sample.sha256);
 const pkg=await readJson('package.json'),lock=await readJson('package-lock.json');
 assert.equal(pkg.version,lock.version);assert.equal(pkg.name,lock.name);
+const index=await readFile(path.join(root,'public/index.html'),'utf8');
+assert.ok(index.includes(`data-version="${pkg.version}"`),'Displayed NAP version must match package.json');
+assert.match(index,/data-build="[0-9a-f]{12}"/,'The displayed build ID must be generated before publishing');
 assert.equal(pkg.devDependencies.playwright,lock.packages['node_modules/playwright'].version);
 const report={checkedAt:new Date().toISOString(),files:files.length,verifiedHashes:verified,
   checkedReferences:references,pagesFiles,pagesBytes,totalBytes:sizes.reduce((sum,file)=>sum+file.bytes,0),largest:sizes.slice(0,4)};

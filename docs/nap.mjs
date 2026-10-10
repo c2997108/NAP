@@ -1,4 +1,5 @@
 const $=id=>document.getElementById(id);
+const appVersion=$('app-version').dataset.version;
 const stages=['split-reads','get-consensus','annotation'];
 const splitFrame=$('split-frame'),consensusFrame=$('consensus-frame'),annotationFrame=$('annotation-frame');
 const frames={'split-reads':splitFrame,'get-consensus':consensusFrame,annotation:annotationFrame};
@@ -85,7 +86,7 @@ $('transfer-selected').onclick=async()=>{
     const names=state.files.filter(file=>selected.has(file.name)).map(file=>file.name);
     const exported=await split().exportFastq(names,state.revision);
     if(token!==transferToken)return;
-    consensus().setFiles(exported.files,{application:'NAP',version:'1.0.0',...exported.provenance});
+    consensus().setFiles(exported.files,{application:'NAP',version:appVersion,...exported.provenance});
     $('transfer-status').textContent=`${exported.files.length} FASTQを読み込みました。下の解析条件を確認して「解析を開始」を押してください。`;
     activate('get-consensus');
   } catch(error) {if(token===transferToken) {$('transfer-status').textContent=error.message;$('transfer-status').classList.add('error');}}
