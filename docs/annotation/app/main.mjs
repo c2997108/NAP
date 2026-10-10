@@ -1,18 +1,42 @@
 import { defaults, validateOptions } from './core.mjs';
+import { memoryBudget, cpuParallelism } from './parallel.mjs';
 import { makeZip } from '../../get-consensus/app/zip.mjs';
 const $ = id => document.getElementById(id);
 let tableFile, referenceFile, pathFile, dbFiles = [], provenance = null, worker, result, busy = false, generation = 0, timer, started;
+let manualBudgetMB = defaults.memoryBudgetMB;
+let manualParallelQueries = defaults.parallelQueries;
 const notify = () => window.dispatchEvent(new Event('nap:annotation-state'));
 function status(message, error = false) { $('status').textContent = message; $('status').classList.toggle('error', error); }
 function controls() {
   $('start').disabled = busy || !tableFile || !crossOriginIsolated;
   $('cancel').disabled = !busy;
-  for (const input of document.querySelectorAll('#options input,#options textarea,#reference-mode,input[type=file],#demo')) input.disabled = busy;
+  for (const input of document.querySelectorAll('#options input,#options textarea,#options select,#reference-mode,input[type=file],#demo')) input.disabled = busy;
   $('input-summary').textContent = tableFile ? `${tableFile.name} · ${(tableFile.size / 1024).toFixed(1)} KB${provenance ? ' · get-consensusから受け取り' : ''}` : 'id・seq・qual・サンプル別カウントのタブ区切り表を指定してください。';
   notify();
 }
+function memorySettings() {
+  const automatic = $('memory-mode').value === 'auto', plan = memoryBudget({ memoryMode: 'auto' });
+  $('memory-budget').readOnly = automatic;
+  $('memory-budget').min = automatic ? '1' : '256';
+  $('memory-budget').value = automatic ? plan.budgetMB : manualBudgetMB;
+  $('memory-budget-summary').textContent = automatic
+    ? `${plan.deviceMemoryGB === null ? '端末RAM情報を取得できないため512 MiBで設定' : `RAM概算 ${plan.deviceMemoryGB} GiBの25%から自動設定`}。空きRAMの実測値ではありません。不足時は並列数を減らします。`
+    : '手動の予算で並列数を調整します。実メモリーの上限を保証する値ではありません。不足時は並列数を減らします。';
+}
+function parallelSettings() {
+  const automatic = $('parallel-mode').value === 'auto', cpu = cpuParallelism({ parallelMode: 'auto' });
+  $('parallel-queries').readOnly = automatic;
+  $('parallel-queries').value = automatic ? cpu.requested : manualParallelQueries;
+  $('parallel-summary').textContent = automatic
+    ? `${cpu.processorSource === 'device' ? `CPU ${cpu.cores} 論理コアから自動設定` : 'CPU情報を取得できないため2グループで設定'}。DB・メモリー・配列数に応じて実際の並列数を調整します。`
+    : 'CPU・DBサイズ・メモリー予算に合わせて実際の並列数を調整します。1で逐次検索。';
+}
+$('parallel-mode').onchange = parallelSettings;
+$('parallel-queries').oninput = () => { if ($('parallel-mode').value === 'manual') manualParallelQueries = $('parallel-queries').value; };
+$('memory-mode').onchange = memorySettings;
+$('memory-budget').oninput = () => { if ($('memory-mode').value === 'manual') manualBudgetMB = $('memory-budget').value; };
 function busyState(value) { busy = value; controls(); clearInterval(timer); if (value) { started = Date.now(); timer = setInterval(() => $('elapsed').textContent = `${Math.floor((Date.now() - started) / 1000)} 秒`, 1000); } else $('elapsed').textContent = started ? `${((Date.now() - started) / 1000).toFixed(1)} 秒` : ''; }
-function clearResult() { generation++; result = null; $('results').hidden = true; $('progress-panel').hidden = true; $('progress').value = 0; $('log').textContent = ''; }
+function clearResult() { generation++; result = null; $('results').hidden = true; $('progress-panel').hidden = true; $('progress').value = 0; $('progress-value').textContent = '0%'; $('progress-detail').textContent = ''; $('log').textContent = ''; }
 function setTable(file, inputProvenance = null) {
   if (busy) throw Error('分類解析中です。終了または中止してから入力を変更してください。');
   if (!file || typeof file.text !== 'function') throw Error('コンセンサス集計表のFileが必要です。');
@@ -95,4 +119,4 @@ $('demo').onclick = async () => {
   } catch (error) { status(error.message,true); }
 };
 window.napAnnotation = { setTable, get result() { return result; }, get state() { return { busy, revision:generation, input:tableFile ? {name:tableFile.name,size:tableFile.size} : null, result:result?.manifest.summary }; } };
-referenceMode(); controls();
+referenceMode(); memorySettings(); parallelSettings(); controls();

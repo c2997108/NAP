@@ -3,7 +3,7 @@ import { distributionChartSource } from './distribution-chart.mjs';
 
 export const SPLIT_RESULT_PAGE = 'split-barcode-results.html';
 const format = value => Number(value).toLocaleString('ja-JP', { maximumFractionDigits: 2 });
-const optionLabels = { task: 'BLAST 検索モード', word_size: 'word_size', primerCoverage: 'プライマー被覆率', primerIdentity: 'プライマー一致率 (%)', barcodeCoverage: 'バーコード被覆率', barcodeIdentity: 'バーコード一致率 (%)', batchSize: '1バッチのリード数', concurrency: '同時処理ファイル数', expand: '縮重塩基を展開', suppressChimeras: 'キメラを抑制', diagnostics: 'BLAST 判定根拠を保存' };
+const optionLabels = { parallelMode: '並列数の設定方法', task: 'BLAST 検索モード', word_size: 'word_size', primerCoverage: 'プライマー被覆率', primerIdentity: 'プライマー一致率 (%)', barcodeCoverage: 'バーコード被覆率', barcodeIdentity: 'バーコード一致率 (%)', batchSize: '1バッチのリード数', concurrency: '同時処理ファイル／バッチ数', expand: '縮重塩基を展開', suppressChimeras: 'キメラを抑制', diagnostics: 'BLAST 判定根拠を保存' };
 
 export function splitResultPage({ summary, options, fastqFiles, primerText = '', sampleText = '', diagnostics = false, execution, files, fastqOnly = false }) {
   const metrics = [['入力リード', summary.totalReads], ['分類済みリード', summary.assignedReads], ['未分類リード', summary.unassignedReads], ['出力配列', summary.segments], ['出力サンプル', summary.samples.length]];
@@ -16,6 +16,7 @@ export function splitResultPage({ summary, options, fastqFiles, primerText = '',
     ${settingsSection({ ...options, word_size: 4, diagnostics }, optionLabels)}
     <section><h2>解析に使用したプライマー・サンプル定義</h2><h3><a href="./primer.fa" download>primer.fa</a></h3><pre id="saved-primer">${escapeHtml(primerText)}</pre><h3><a href="./sample.txt" download>sample.txt</a></h3><pre id="saved-sample">${escapeHtml(sampleText)}</pre></section>
     ${execution?.files ? `<section><h2>入力ファイル別の実行結果</h2>${resultTable(['入力ファイル', '状態', '入力リード', '分類済みリード'], execution.files.map(file => [file.name, file.state === 'complete' ? '完了' : file.state, format(file.totalReads), format(file.assignedReads)]))}</section>` : ''}
+    ${execution ? `<section><h2>CPU・並列数・メモリーの実行情報</h2><pre>${escapeHtml(JSON.stringify(Object.fromEntries(Object.entries(execution).filter(([key]) => key !== 'files')), null, 2))}</pre></section>` : ''}
     ${filesSection(files)}`;
   const script = `${distributionChartSource()}const samples=${scriptJson(summary.samples)};for(const node of document.querySelectorAll('[data-chart]'))node.append(distributionChart(samples[Number(node.dataset.sampleIndex)],node.dataset.chart));`;
   return resultPage({ title: 'NAP · split-barcode 結果', body, script });

@@ -1,7 +1,7 @@
 // Browser port of nanopore~split-barcode's primer/tag and adjacent-hit rules.
 // Coordinates in BLAST and assignments are 1-based, inclusive.
 import { gzipTransform } from './gzip-stream.mjs';
-export const DEFAULT_OPTIONS = Object.freeze({ expand: true, primerCoverage: 0.6, primerIdentity: 80, suppressChimeras: false, barcodeCoverage: 0.9, barcodeIdentity: 90, batchSize: 300, task: 'megablast', concurrency: 8 });
+export const DEFAULT_OPTIONS = Object.freeze({ expand: true, primerCoverage: 0.6, primerIdentity: 80, suppressChimeras: false, barcodeCoverage: 0.9, barcodeIdentity: 90, batchSize: 300, task: 'megablast', parallelMode: 'auto', concurrency: 8 });
 const ambiguity = { A:'A', C:'C', G:'G', T:'T', R:'AG', M:'AC', W:'AT', S:'CG', Y:'CT', K:'GT', H:'ATC', B:'GTC', D:'GAT', V:'ACG', N:'ACGT' };
 const complement = { A:'T', C:'G', G:'C', T:'A', B:'V', V:'B', D:'H', H:'D', K:'M', M:'K', R:'Y', Y:'R', S:'S', W:'W', N:'N' };
 export const isDefinitionName = name => /^[A-Za-z0-9_.-]+$/.test(name);
@@ -11,11 +11,13 @@ export function validateDefinitionName(name, label) {
 export function reverseComplement(sequence) { return [...sequence.toUpperCase()].reverse().map(base => complement[base] || 'N').join(''); }
 export function validateOptions(values = {}) {
   const options = { ...DEFAULT_OPTIONS, ...values };
+  if (values.parallelMode === undefined && values.concurrency !== undefined) options.parallelMode = 'manual';
+  if (!['auto', 'manual'].includes(options.parallelMode)) throw new Error('並列数の設定方法が不正です。');
   if (!['megablast', 'blastn'].includes(options.task)) throw new Error('検索モードは megablast または blastn にしてください。');
   for (const key of ['primerCoverage', 'barcodeCoverage']) if (!Number.isFinite(options[key]) || options[key] <= 0 || options[key] > 1) throw new Error(`${key}: 0 より大きく 1 以下にしてください。`);
   for (const key of ['primerIdentity', 'barcodeIdentity']) if (!Number.isFinite(options[key]) || options[key] < 0 || options[key] > 100) throw new Error(`${key}: 0〜100 にしてください。`);
   if (!Number.isInteger(options.batchSize) || options.batchSize < 1 || options.batchSize > 10000) throw new Error('バッチサイズは 1〜10000 の整数にしてください。');
-  if (!Number.isInteger(options.concurrency) || options.concurrency < 1 || options.concurrency > 16) throw new Error('同時処理ファイル数は 1〜16 の整数にしてください。');
+  if (!Number.isSafeInteger(options.concurrency) || options.concurrency < 1) throw new Error('同時処理ファイル数は1以上の整数にしてください。');
   for (const key of ['expand', 'suppressChimeras']) if (typeof options[key] !== 'boolean') throw new Error(`${key}: boolean が必要です。`);
   return options;
 }

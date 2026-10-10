@@ -3,22 +3,29 @@ import { defaults, validateOptions, parseTable, parseBlast, HitPool, filterHits,
 import { inspectFasta, fastaShards, readTaxonomy, validateManifest, referenceBytes, referenceFile } from './reference.mjs';
 import { annotationWorkbook } from './workbook.mjs';
 import { annotationResultPage } from './result-page.mjs';
+import { queryGroups, parallelPlan, sharedReference } from './parallel.mjs';
+import { mapParallel } from '../../get-consensus/app/parallel.mjs';
+import { isMemoryAllocationError } from '../../get-consensus/app/memory.mjs';
 export { defaults };
-export async function runAnnotation(input, { tools = new ConsensusTools(), onProgress = () => {}, signal } = {}) {
+export async function runAnnotation(input, { tools = new ConsensusTools(), onProgress = () => {}, signal, environment = globalThis.navigator || {} } = {}) {
   const started = performance.now(), o = validateOptions(input.options), files = new Map(), logs = [], warnings = [];
   const save = (name, text, type = 'text/plain;charset=utf-8') => files.set(name, text instanceof Blob ? text : new Blob([text], { type }));
   const progress = (fraction, phase, detail) => { signal?.throwIfAborted(); onProgress({ fraction: Math.min(.99, fraction), phase, detail }); };
-  async function run(tool, args, settings) {
-    signal?.throwIfAborted(); logs.push(`$ ${tool} ${args.join(' ')}`);
-    const result = await tools.run(tool, args, { ...settings, signal });
+  async function run(tool, args, settings, jobSignal = signal) {
+    jobSignal?.throwIfAborted(); logs.push(`$ ${tool} ${args.join(' ')}`);
+    const result = await tools.run(tool, args, { ...settings, signal: jobSignal });
     logs.push(result.stdout, result.stderr);
     if (result.exitCode !== 0) throw Error(`${tool}: ${result.stderr || result.stdout || '実行に失敗しました。'}`);
     return result.files;
   }
   progress(0, '入力を読み込み', input.tableFile.name);
   const sourceText = await input.tableFile.text(), table = parseTable(sourceText), pool = new HitPool();
-  const batches = Array.from({ length: Math.ceil(table.rows.length / o.batchSize) }, (_, batch) => table.rows.slice(batch * o.batchSize, (batch + 1) * o.batchSize).map((row, index) => `>q${batch * o.batchSize + index}\n${row.seq}\n`).join(''));
-  const allFasta = batches.join('');
+  const initialPlan = parallelPlan(o, { inputBytes: input.tableFile.size, groups: table.rows.length }, environment);
+  const initialWidth = initialPlan.limit, requested = initialPlan.requested;
+  const batches = queryGroups(table.rows, o.batchSize, initialWidth), totalQueryBases = batches.reduce((sum, batch) => sum + batch.bases, 0);
+  const budget = { limit: requested, memoryRetries: 0 };
+  const concurrency = { requested, parallelMode: initialPlan.parallelMode, cores: initialPlan.cores, processorSource: initialPlan.processorSource, peak: 0, finalLimit: 1, memoryRetries: 0, sharedReference: false };
+  let completedBases = 0;
   let info, manifest, taxonomyFile = input.pathFile, shards, source, completed = 0;
   if (input.mode === 'fasta') {
     if (!input.referenceFile || !taxonomyFile) throw Error('参照FASTAと分類対応表（.path）を選択してください。');
@@ -39,10 +46,39 @@ export async function runAnnotation(input, { tools = new ConsensusTools(), onPro
     info = { name: manifest.database, mode: input.mode, totalBases: manifest.totalBases, sequences: manifest.sequences, source: manifest.source, volumes: manifest.shards.length };
     shards = manifest.shards;
   }
+  const searchFraction = () => .02 + .91 * completedBases / (info.volumes * totalQueryBases);
+  async function search(db, name, args, consume, phase, detail, subjects) {
+    const dbBytes = Object.values(db).reduce((sum, bytes) => sum + bytes.byteLength, 0);
+    const plan = parallelPlan(o, { referenceBytes: dbBytes, inputBytes: input.tableFile.size, maxQueryBases: batches.reduce((max, batch) => Math.max(max, batch.bases), 0), groups: batches.length }, environment);
+    const limit = Math.min(plan.limit, budget.limit);
+    Object.assign(concurrency, { finalLimit: limit, memoryMode: plan.mode, budgetSource: plan.source, deviceMemoryGB: plan.deviceMemoryGB, memoryBudgetMB: plan.budgetMB,
+      estimatedWorkerMB: Math.max(concurrency.estimatedWorkerMB || 0, plan.estimatedWorkerMB), reservedMB: Math.max(concurrency.reservedMB || 0, plan.reservedMB) });
+    let completedRows = 0;
+    if (limit > 1) {
+      try { const shared = sharedReference(db); db = shared.files; concurrency.sharedReference ||= shared.shared; }
+      catch (error) {
+        if (!isMemoryAllocationError(error) && !(error instanceof RangeError)) throw error;
+        budget.limit = 1; warnings.push('参照DBの共有メモリーを確保できなかったため、逐次検索に切り替えました。');
+      }
+    }
+    await mapParallel(batches, Math.min(limit, budget.limit), async (batch, index, jobSignal) => {
+      const output = await run('blastn', ['-db',name,'-query','query.fa',...args,'-outfmt','6','-out','hits.tsv'], { files: { ...db, 'query.fa': batch.query }, outputs: ['hits.tsv'] }, jobSignal);
+      consume(parseBlast(new TextDecoder().decode(output['hits.tsv']), phase === 'BLAST検索' ? shardIndex : 0, subjects));
+      completedRows += batch.count;
+      if (phase === 'BLAST検索') { completed++; completedBases += batch.bases; }
+    }, { signal, budget, onState: state => {
+      concurrency.peak = Math.max(concurrency.peak, state.active.length); concurrency.finalLimit = state.limit;
+      progress(phase === 'BLAST検索' ? searchFraction() : .96 + .01 * completedRows / table.rows.length, phase,
+        `${detail} · ${completedRows}/${table.rows.length} 配列完了 · 同時 ${state.active.length}/${state.limit} グループ（${initialPlan.parallelMode === 'auto' ? 'CPUから自動' : '指定'} ${requested}）`);
+    }, onMemoryPressure: state => {
+      concurrency.memoryRetries = budget.memoryRetries;
+      warnings.push(`メモリー不足のため並列検索を${state.previous}から${state.limit}グループへ減らし、失敗したグループを再試行しました。`);
+    } });
+  }
   let shardIndex = 0;
   for await (const shard of shards) {
     let db, name;
-    progress(.02 + .91 * completed / (info.volumes ? info.volumes * batches.length : Math.max(1, completed + batches.length)), '参照DBを読み込み', `分割 ${shardIndex + 1}`);
+    progress(searchFraction(), '参照DBを読み込み', `分割 ${shardIndex + 1}`);
     if (input.mode === 'fasta') {
       name = 'reference';
       db = await run('makeblastdb', ['-in','reference.fa','-out',name,'-dbtype','nucl','-blastdb_version','4'], { files: { 'reference.fa': shard.fasta }, outputs: ['reference.nhr','reference.nin','reference.nsq'] });
@@ -50,16 +86,10 @@ export async function runAnnotation(input, { tools = new ConsensusTools(), onPro
       name = shard.name; db = {};
       for (const spec of shard.files) db[spec.name] = await referenceBytes(spec, source, signal);
     }
-    for (const [batch, query] of batches.entries()) {
-      const output = await run('blastn', ['-db',name,'-query','query.fa','-dbsize',String(info.totalBases),'-max_target_seqs',String(MAX_TARGETS),'-outfmt','6','-out','hits.tsv'], { files: { ...db, 'query.fa': query }, outputs: ['hits.tsv'] });
-      pool.add(parseBlast(new TextDecoder().decode(output['hits.tsv']), shardIndex, shard.subjects));
-      completed++;
-      const denominator = info.volumes ? info.volumes * batches.length : Math.max(completed, info.totalBases / o.shardBases * batches.length);
-      progress(.02 + .91 * Math.min(1, completed / denominator), 'BLAST検索', `参照DB ${shardIndex + 1}${info.volumes ? '/' + info.volumes : ''} · 配列 ${Math.min(table.rows.length, (batch + 1) * o.batchSize)}/${table.rows.length}`);
-    }
+    await search(db, name, ['-dbsize',String(info.totalBases),'-max_target_seqs',String(MAX_TARGETS)], hits => pool.add(hits), 'BLAST検索', `参照DB ${shardIndex + 1}/${info.volumes}`, shard.subjects);
     shardIndex++;
   }
-  const hits = pool.hits(), filtered = filterHits(hits, table.rows, o);
+  const hits = pool.hits().sort((a,b) => Number(a.query.slice(1)) - Number(b.query.slice(1))), filtered = filterHits(hits, table.rows, o);
   progress(.94, '分類名とLCAを計算', `${filtered.length.toLocaleString()} 件のヒット`);
   if (manifest) taxonomyFile = await referenceFile(manifest.taxonomy, source, signal);
   const needed = new Set(filtered.map(hit => hit.subject)), taxonomy = await readTaxonomy(taxonomyFile, needed, signal);
@@ -69,16 +99,16 @@ export async function runAnnotation(input, { tools = new ConsensusTools(), onPro
   if (o.internalControl) {
     progress(.96, '内部コントロールを検索', '一致率80%以上・アラインメント長60 bp以上');
     const db = await run('makeblastdb', ['-in','control.fa','-out','control','-dbtype','nucl','-blastdb_version','4'], { files: { 'control.fa': `>internalcontrol\n${o.internalControl}\n` }, outputs: ['control.nhr','control.nin','control.nsq'] });
-    const output = await run('blastn', ['-db','control','-query','query.fa','-outfmt','6','-out','hits.tsv'], { files: { ...db, 'query.fa': allFasta }, outputs: ['hits.tsv'] });
-    controls = parseBlast(new TextDecoder().decode(output['hits.tsv']));
+    await search(db, 'control', [], hits => { for (const hit of hits) controls.push(hit); }, '内部コントロールを検索', '一致率80%以上・アラインメント長60 bp以上');
+    controls.sort((a,b) => Number(a.query.slice(1)) - Number(b.query.slice(1)));
   }
   const result = annotate(table, filtered, taxonomy, controls);
   const renderedHits = rows => rows.map(hit => { const fields = [...hit.fields]; fields[0] = table.rows[Number(hit.query.slice(1))].id; return fields.join('\t'); }).join('\n') + (rows.length ? '\n' : '');
   const manifestOut = { application: 'NAP', stage: 'annotation~rRNA-for-metabarcoding', upstreamCommit: UPSTREAM_COMMIT, blastVersion: '2.16.0+', options: o, input: { name: input.tableFile.name, size: input.tableFile.size }, reference: info,
-    execution: { referenceVolumes: shardIndex, blastBatches: completed, referenceDbsize: info.totalBases, maxTargetSequences: MAX_TARGETS, task: 'megablast', threadsPerWorker: 1 },
+    execution: { referenceVolumes: shardIndex, blastBatches: completed, referenceDbsize: info.totalBases, maxTargetSequences: MAX_TARGETS, task: 'megablast', threadsPerWorker: 1, queryGroups: batches.length, concurrency },
     summary: { representatives: result.rows.length, annotated: result.rows.filter(row => row.annotation.lca).length, internalControls: result.rows.filter(row => row.annotation.lca === 'internal_control').length, groups: result.species.length, samples: result.names.length }, warnings,
     elapsedMs: performance.now() - started, ...(input.provenance ? { nap: input.provenance } : {}) };
-  save('all.cnt.seq.qual.txt', sourceText); save('queries.fasta', allFasta.replace(/^>q(\d+)$/gm, (_, index) => '>' + table.rows[Number(index)].id));
+  save('all.cnt.seq.qual.txt', sourceText); save('queries.fasta', new Blob(batches.map(batch => batch.query.replace(/^>q(\d+)$/gm, (_, index) => '>' + table.rows[Number(index)].id)), { type: 'text/plain;charset=utf-8' }));
   save('blast.tsv', renderedHits(hits)); save('blast.filtered.tsv', renderedHits(filtered)); save('internalcontrol.blast.tsv', renderedHits(controls));
   save('all.cnt.seq.qual.tax.txt', taxTable(result)); save('all.cnt.seq.qual.tax.sp.txt', taxTable(result, result.species));
   save('annotations.tsv', ['id\tlca\ttop.taxpath\talign.len\tidentity', ...result.rows.map(row => [row.id, row.annotation.lca, row.annotation.topTaxpath, row.annotation.length, row.annotation.identity].join('\t'))].join('\n') + '\n');

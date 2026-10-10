@@ -65,7 +65,17 @@ try {
   for(const frame of [page.mainFrame(),split,consensus])assert.equal(await frame.evaluate(()=>crossOriginIsolated),true);
   assert.equal(await page.locator('#transfer-selected').isDisabled(),true);
   assert.equal(await consensus.locator('input[name=minReads]').inputValue(),'3');
-  assert.equal(await consensus.locator('input[name=parallelSamples]').inputValue(),'8');
+  const cores=await consensus.evaluate(()=>navigator.hardwareConcurrency || 2);
+  for(const [frame,field] of [[split,'#concurrency'],[consensus,'input[name=parallelSamples]']]) {
+    await page.getByRole('tab',{name:frame===split?/split-reads/:/get-consensus/}).click();
+    assert.equal(await frame.locator('#parallel-mode').inputValue(),'auto');
+    assert.equal(await frame.locator(field).inputValue(),String(cores));
+    assert.equal(await frame.locator(field).evaluate(input=>input.readOnly),true);
+    await frame.locator('#parallel-mode').selectOption('manual');await frame.locator(field).fill('3');
+    await frame.locator('#parallel-mode').selectOption('auto');assert.equal(await frame.locator(field).inputValue(),String(cores));
+    await frame.locator('#parallel-mode').selectOption('manual');assert.equal(await frame.locator(field).inputValue(),'3');
+    await frame.locator('#parallel-mode').selectOption('auto');
+  }
   await page.getByRole('tab',{name:/get-consensus/}).click();
   assert.equal(await page.locator('#handoff-empty').isVisible(),true);
   await page.getByRole('tab',{name:/split-reads/}).click();
@@ -86,7 +96,7 @@ try {
   const splitReport=await split.evaluate(async()=>JSON.parse(await (await window.demultiplexer.readFile('run.json')).text()));
   assert.equal(splitReport.summary.totalReads,12);assert.equal(splitReport.summary.segments,12);
   assert.equal(splitReport.summary.assignedReads,12);assert.equal(splitReport.summary.samples.length,2);
-  assert.equal(splitReport.execution.maxActiveFiles,2);
+  assert.equal(splitReport.execution.maxActiveFiles,2);assert.equal(splitReport.execution.requested,cores);assert.equal(splitReport.execution.parallelMode,'auto');
   assert.equal(splitReport.summary.batches,6);
   for(const sample of splitReport.summary.samples) {
     assert.equal(sample.meanLength,400);assert.equal(sample.medianLength,400);
@@ -209,11 +219,18 @@ try {
   assert.deepEqual(complete.manifest.samples.map(sample=>sample.assigned),[6,6]);
   assert.deepEqual(complete.rows.map(row=>row.counts).sort((a,b)=>a[0]-b[0]),[[0,6],[6,0]]);
   assert.deepEqual(complete.rows.map(row=>row.seq).sort(),expected.samples.map(sample=>sample.sequence).sort());
-  assert.equal(complete.manifest.concurrency.samplePeak,2);
+  assert.equal(complete.manifest.concurrency.samplePeak,2);assert.equal(complete.manifest.concurrency.requested,cores);assert.equal(complete.manifest.concurrency.parallelMode,'auto');
+  const txtEvent=page.waitForEvent('download');await consensus.locator('#txt-download').click();
+  const txtDownload=await txtEvent;assert.equal(txtDownload.suggestedFilename(),'all.cnt.seq.qual.txt');
+  const txtPath=path.join(output,'all.cnt.seq.qual.txt');await txtDownload.saveAs(txtPath);
+  const table=await consensus.evaluate(async()=>({blob:await window.getConsensus.result.files.get('all.cnt.seq.qual.txt').text(),handoff:await window.napConsensus.exportTable().file.text()}));
+  assert.equal(await readFile(txtPath,'utf8'),table.blob);assert.equal(table.blob,table.handoff);
+  console.log('PASS dedicated TXT download matches the exact rRNA annotation handoff');
   assert.equal(complete.manifest.nap.split.summary.totalReads,12);
   const archiveEvent=page.waitForEvent('download');await consensus.locator('#zip').click();
   const archiveDownload=await archiveEvent;await archiveDownload.saveAs(path.join(output,'nap-consensus.zip'));
   const archive=unzipSync(await readFile(path.join(output,'nap-consensus.zip')));
+  assert.equal(strFromU8(archive['all.cnt.seq.qual.txt']),await readFile(txtPath,'utf8'));
   assert.ok(archive['output-consensus.fasta']);assert.ok(archive['all.cnt.seq.qual.xlsx']);assert.ok(archive['output-consensus-viewer.html']);assert.ok(archive['get-consensus-results.html']);
   await checkSavedPage('get-consensus',strFromU8(archive['get-consensus-results.html']),archive,'consensus');
   console.log('PASS saved consensus results HTML: offline counts, run options, sequence selection/zoom, alignments and valid local output links');
@@ -236,6 +253,7 @@ try {
   assert.equal(await consensus.evaluate(()=>window.getConsensus.result.manifest.samples.length),2,'Imported files/result remain valid after splitter reset');
   await consensus.locator('#files').setInputFiles(path.join(output,'split-output/nap_demo_A.fq'));
   assert.equal(await consensus.evaluate(()=>window.napConsensus.state.provenance),null,'Disk input must not retain stale split provenance');
+  assert.equal(await consensus.locator('#txt-download').getAttribute('href'),null,'Input changes revoke the old TXT download');
   await consensus.locator('#start').click();await consensus.locator('#cancel').click();
   await consensus.waitForFunction(()=>!window.getConsensus.busy);assert.match(await consensus.locator('#status').textContent(),/中止/);
   await consensus.locator('#start').click();await consensus.waitForFunction(()=>!window.getConsensus.busy && !!window.getConsensus.result);

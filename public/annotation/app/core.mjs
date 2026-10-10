@@ -1,19 +1,23 @@
 export const defaults = {
   topScore: 1, minBitscore: 100, minIdentity: 90, minLength: 100, minCoverage: 0,
-  batchSize: 100, shardBases: 16000000,
+  batchSize: 100, shardBases: 16000000, parallelMode: 'auto', parallelQueries: 4, memoryMode: 'auto', memoryBudgetMB: 1024,
   internalControl: 'TCACCAACTGGGATGACATGGAGAAGATCTGGCACCACACCTTCTACAATGAGCTGCATGTGGCTCCCAAGGAGCACCGTATGCTGCTGACTGAGGTCCCCCTGAATCCAAGGCCAACCACAAGAAGATGA',
 };
 export const UPSTREAM_COMMIT = '5c98917ecd94f807670e0537c8a63c5a0a048924';
 export const MAX_TARGETS = 500;
 export function validateOptions(options = {}) {
   const o = { ...defaults, ...options };
-  for (const key of ['topScore', 'minBitscore', 'minIdentity', 'minLength', 'minCoverage', 'batchSize', 'shardBases']) {
+  for (const key of ['topScore', 'minBitscore', 'minIdentity', 'minLength', 'minCoverage', 'batchSize', 'shardBases', 'parallelQueries', 'memoryBudgetMB']) {
     if (!Number.isFinite(o[key])) throw Error(`${key}: 数値を入力してください。`);
   }
   if (o.topScore < 0 || o.topScore > 1) throw Error('LCAスコア比は0〜1です。');
   for (const key of ['minIdentity', 'minCoverage']) if (o[key] < 0 || o[key] > 100) throw Error(`${key}: 0〜100です。`);
   if (o.minBitscore < 0 || o.minLength < 0) throw Error('スコア・長さの閾値は0以上です。');
   for (const key of ['minLength', 'batchSize', 'shardBases']) if (!Number.isInteger(o[key]) || o[key] < (key === 'minLength' ? 0 : 1)) throw Error(`${key}: 整数を入力してください。`);
+  if (!['auto', 'manual'].includes(o.parallelMode)) throw Error('並列数は自動または手動を選択してください。');
+  if (!Number.isSafeInteger(o.parallelQueries) || o.parallelQueries < 1) throw Error('同時に検索する配列グループ数は1以上の整数です。');
+  if (!['auto', 'manual'].includes(o.memoryMode)) throw Error('メモリー予算は自動または手動を選択してください。');
+  if (!Number.isSafeInteger(o.memoryBudgetMB) || o.memoryBudgetMB < (o.memoryMode === 'auto' ? 1 : 256)) throw Error('手動のメモリー予算は256 MiB以上の整数です。');
   o.internalControl = o.internalControl.replace(/\s/g, '').toUpperCase();
   if (o.internalControl && !/^[ACGTRYSWKMBDHVNU]+$/.test(o.internalControl)) throw Error('内部コントロール配列が不正です。');
   return o;

@@ -6,13 +6,16 @@ import { haplotypes } from './haplotype.mjs';
 import { mapParallel } from './parallel.mjs';
 import { ConsensusProgress } from './progress.mjs';
 import { ConsensusSamples } from './sample-client.mjs';
+import { fileParallelPlan } from '../../shared/parallel-settings.mjs';
 import { toolScope } from './tool-scope.mjs';
-export const defaults={firstIdentity:.97,minReads:3,maxReads:30,secondIdentity:.99,allIdentity:1,blastIdentity:.9,minBitscore:200,minDepth:30,batchSize:300,parallelSamples:8,strand:'plus',adjustDirection:false,haplotypes:true};
+export const defaults={firstIdentity:.97,minReads:3,maxReads:30,secondIdentity:.99,allIdentity:1,blastIdentity:.9,minBitscore:200,minDepth:30,batchSize:300,parallelMode:'auto',parallelSamples:8,strand:'plus',adjustDirection:false,haplotypes:true};
 export function validateOptions(options={}) {
   const o={...defaults,...options};
+  if(options.parallelMode===undefined && options.parallelSamples!==undefined)o.parallelMode='manual';
+  if(!['auto','manual'].includes(o.parallelMode))throw new Error('並列数の設定方法が不正です。');
   for(const key of ['firstIdentity','secondIdentity','blastIdentity']) if(!Number.isFinite(o[key]) || o[key]<=0 || o[key]>1) throw new Error(`${key}: 0 より大きく 1 以下にしてください。`);
   if(!Number.isFinite(o.allIdentity) || o.allIdentity<.4 || o.allIdentity>1) throw new Error('CD-HIT の閾値は 0.4〜1 です。');
-  for(const key of ['minReads','maxReads','minDepth','batchSize','parallelSamples']) if(!Number.isInteger(o[key]) || o[key]<1) throw new Error(`${key}: 正の整数にしてください。`);
+  for(const key of ['minReads','maxReads','minDepth','batchSize','parallelSamples']) if(!Number.isSafeInteger(o[key]) || o[key]<1) throw new Error(`${key}: 正の整数にしてください。`);
   if(o.maxReads>=20000) throw new Error('MAFFT に用いるリード数は 20000 未満にしてください。');
   if(!Number.isFinite(o.minBitscore) || o.minBitscore<0) throw new Error('Bitscore は 0 以上にしてください。');
   if(!['plus','both'].includes(o.strand)) throw new Error('strand が不正です。');
@@ -37,7 +40,7 @@ export function blastCounts(text,{blastIdentity=.9,minBitscore=200}={}) {
   return {counts,assigned};
 }
 export class ConsensusPipeline {
-  constructor({tools=new ConsensusTools(),sampleJobs=new ConsensusSamples(),onProgress=()=>{}}={}) {this.tools=tools;this.sampleJobs=sampleJobs;this.onProgress=onProgress;}
+  constructor({tools=new ConsensusTools(),sampleJobs=new ConsensusSamples(),onProgress=()=>{},environment=globalThis.navigator||{}}={}) {this.tools=tools;this.sampleJobs=sampleJobs;this.onProgress=onProgress;this.environment=environment;}
   async analyseSample({file,name},o,signal,onProgress=()=>{}) {
       const local=toolScope(this.tools,{label:name,signal,options:o,onProgress,onCommand:()=>onProgress({command:true})}),{save,emit,warn,run,align}=local,entries=[];
       const step=(stage,fraction,detail='',extra={})=>onProgress({step:{stage,fraction,detail,extra},message:`[${name}] ${file.name}: ${detail}`});
@@ -165,7 +168,8 @@ export class ConsensusPipeline {
     const o=validateOptions(options),samples=[],entries=[];
     const started=new Date().toISOString(); let commands=0, ties=0;
     let parallel, tracker;
-    const concurrency={limit:Math.min(o.parallelSamples,inputFiles?.length||0),samplePeak:0,blastPeak:0};
+    const plan=fileParallelPlan({parallelMode:o.parallelMode,parallelCount:o.parallelSamples},inputFiles||[],{readsInMemory:true},this.environment);
+    const concurrency={...plan,samplePeak:0,blastPeak:0};
     // Each sample owns its outputs and logs; merge in input order after the
     // barrier so worker completion order never changes consensus selection.
     const scope=(label='',signal)=>toolScope(this.tools,{label,signal,options:o,onCommand:()=>{commands++;},onProgress:p=>this.onProgress({...p,commands,parallel,...tracker?.snapshot()})});
@@ -184,15 +188,16 @@ export class ConsensusPipeline {
       concurrency[metric]=Math.max(concurrency[metric],state.active.length);
       emit(`${phase}: ${state.completed} / ${state.total} サンプル完了（同時実行上限 ${state.limit}）`);
     };
-    const budget={limit:o.parallelSamples,memoryRetries:0};
+    const budget={limit:plan.limit,memoryRetries:0};
     const sampleProgress=(name,p)=>{if(p.command)commands++;if(p.step){const {stage,fraction,detail,extra}=p.step;tracker.update(name,stage,fraction,detail,extra);}if(p.message)emit(p.message);};
     const poolOptions=(phase,list,metric)=>({signal,budget,priority:job=>job.file.size,onState:progress(phase,list,metric),onMemoryPressure:p=>{
       concurrency.memoryRetries=budget.memoryRetries;concurrency.effectiveLimit=p.limit;
       const message=`メモリー不足: 同時処理上限 ${p.previous} → ${p.limit}。${list[p.index].name} を再試行します。`;
       warnings.push(message);emit(message);
     }});
+    emit(`CPU ${plan.cores} 論理コア / ${o.parallelMode==='auto'?'自動':'手動'}の指定 ${plan.requested} / 推定メモリー予算 ${plan.memoryBudgetMB} MiB`);
     emit(`${jobs.length} FASTQ を最大 ${concurrency.limit} サンプルずつ並列実行`);
-    const processed=await mapParallel(jobs,o.parallelSamples,(job,index,signal)=>this.sampleJobs.run('analysis',{job,options:o},{signal,onProgress:p=>sampleProgress(job.name,p)}),poolOptions('サンプル解析',jobs,'samplePeak'));
+    const processed=await mapParallel(jobs,plan.limit,(job,index,signal)=>this.sampleJobs.run('analysis',{job,options:o},{signal,onProgress:p=>sampleProgress(job.name,p)}),poolOptions('サンプル解析',jobs,'samplePeak'));
     parallel=undefined;
     for(const result of processed) {merge(result.local);samples.push(result.sample);entries.push(...result.entries);ties+=result.ties;}
     if(!entries.length) throw new Error('コンセンサスが生成されませんでした。クラスターの最小リード数・同一率を確認してください。');
@@ -222,7 +227,7 @@ export class ConsensusPipeline {
     tracker.setGlobal('BLAST集計',1);emit('BLASTデータベース生成完了');
     const sampleCounts=new Map(),totals=new Map();
     const blastJobs=samples.map((sample,index)=>({...jobs[index],sample,dbFiles}));
-    const searched=await mapParallel(blastJobs,o.parallelSamples,(job,index,signal)=>this.sampleJobs.run('blast',{job,options:o},{signal,onProgress:p=>sampleProgress(job.name,p)}),poolOptions('BLAST 集計',blastJobs,'blastPeak'));
+    const searched=await mapParallel(blastJobs,plan.limit,(job,index,signal)=>this.sampleJobs.run('blast',{job,options:o},{signal,onProgress:p=>sampleProgress(job.name,p)}),poolOptions('BLAST 集計',blastJobs,'blastPeak'));
     parallel=undefined;
     for(const result of searched) {
       merge(result.local);Object.assign(samples.find(s=>s.name===result.sample.name),result.sample);sampleCounts.set(result.sample.name,result.counts);

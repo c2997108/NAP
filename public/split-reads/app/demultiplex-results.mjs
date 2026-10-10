@@ -55,7 +55,7 @@ export function mergeFileResults(results, prepared, payload, execution, elapsedM
   }
   if (!totalReads) throw new Error('FASTQ にリードがありません。');
   const samples = [...counts.values()].sort((a, b) => a.sample.localeCompare(b.sample)).map(row => sampleStatistics(row, distributions.get(row.sample)));
-  const summary = { totalReads, assignedReads, unassignedReads: totalReads - assignedReads, segments, totalBases, batches, memoryRetries, samples, primerSequences: prepared.primers.length, sampleDefinitions: prepared.samples.length, normalizedPrimerNames: prepared.normalized, concurrency: execution.concurrency, completedFiles: results.length, elapsedMs };
+  const summary = { totalReads, assignedReads, unassignedReads: totalReads - assignedReads, segments, totalBases, batches, memoryRetries, samples, primerSequences: prepared.primers.length, sampleDefinitions: prepared.samples.length, normalizedPrimerNames: prepared.normalized, concurrency: execution.concurrency, maxActiveFiles: execution.maxActiveFiles, maxActiveBatches: execution.maxActiveBatches, executionMode: execution.mode || 'files', concurrencyMemoryRetries: execution.memoryRetries || 0, completedFiles: execution.completedFiles ?? results.length, elapsedMs };
   const files = [...parts].map(([name, chunks]) => ({ name, blob: textBlob(chunks) }));
   files.push({ name: 'primer-clean.fa', blob: textBlob([prepared.cleanFasta]) }, { name: 'primer-tags.fa', blob: textBlob([prepared.tagsFasta]) }, ...inputDefinitionFiles(payload));
   const context = { ...payload, options: prepared.options, execution, summary };

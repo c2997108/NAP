@@ -1,6 +1,8 @@
+import { fileParallelPlan } from '../../shared/parallel-settings.mjs';
 import { BlastClient } from './blast-client.mjs';
 import { createDatabases } from './demultiplex-pipeline.mjs';
 import { prepareInputs } from './demultiplex-core.mjs';
+import { runSingleFileBatches } from './demultiplex-batch-pool.mjs';
 import { runFilePool } from './demultiplex-file-pool.mjs';
 import { FileProcessingSlot } from './demultiplex-file-client.mjs';
 import { mergeFileResults } from './demultiplex-results.mjs';
@@ -23,11 +25,23 @@ async function run(payload) {
     databases = await Promise.all(databaseFiles.map(async file => ({ name: file.name, data: await databaseBlast.readFile(file.name, { encoding: 'binary' }) })));
   } finally { databaseBlast.dispose(); }
   const databaseBuildMs = performance.now() - started;
-  log(`ファイル単位で最大 ${Math.min(prepared.options.concurrency, payload.fastqFiles.length)} ファイルを同時処理します。`);
-  let lastProgress;
-  const pool = await runFilePool({ files: payload.fastqFiles, concurrency: prepared.options.concurrency, createSlot: () => new FileProcessingSlot({ prepared, databases, diagnostics: payload.diagnostics }, log), onProgress: message => { lastProgress = message; postMessage(message); } });
+  const referenceBytes = databases.reduce((sum, file) => sum + file.data.byteLength, 0);
+  const showPlan = (plan, unit) => log(`CPU ${plan.cores} 論理コア / ${plan.parallelMode === 'auto' ? '自動' : '手動'}の指定 ${plan.requested} / 推定メモリー予算 ${plan.memoryBudgetMB} MiB / 最大 ${plan.limit} ${unit}同時処理`);
+  const onMemoryPressure = p => log(`メモリー不足: 同時処理上限 ${p.previous} → ${p.limit}。${p.name} を再試行します。`);
+  const createSlot = () => new FileProcessingSlot({ prepared, databases, diagnostics: payload.diagnostics }, log);
+  let lastProgress, pool, plan;
+  const onProgress = message => { lastProgress = message; postMessage(message); };
+  if (payload.fastqFiles.length === 1) {
+    pool = await runSingleFileBatches({ file: payload.fastqFiles[0], options: prepared.options, referenceBytes, createSlot, onProgress, onMemoryPressure,
+      onPlan: value => { plan = value; showPlan(plan, 'バッチ'); } });
+    lastProgress = pool.progress;
+  } else {
+    plan = fileParallelPlan({ parallelMode: prepared.options.parallelMode, parallelCount: prepared.options.concurrency }, payload.fastqFiles, { referenceBytes });
+    showPlan(plan, 'ファイル');
+    pool = await runFilePool({ files: payload.fastqFiles, concurrency: plan.limit, onMemoryPressure, createSlot, onProgress });
+  }
   postMessage({ ...lastProgress, stage: '分割結果を統合・集計' });
-  const output = mergeFileResults(pool.results, prepared, { ...payload, diagnostics: Boolean(payload.diagnostics) }, { ...pool.execution, databaseBuildMs }, performance.now() - started);
+  const output = mergeFileResults(pool.results, prepared, { ...payload, diagnostics: Boolean(payload.diagnostics) }, { ...plan, ...pool.execution, databaseBuildMs }, performance.now() - started);
   files = output.files;
   fastqReport = output.fastqReport;
   return { summary: output.summary, files: files.map(({ name, blob }) => ({ name, size: blob.size })) };

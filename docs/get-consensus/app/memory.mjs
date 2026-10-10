@@ -1,5 +1,5 @@
 export function isMemoryAllocationError(error) {
-  return error?.code === 'WASM_MEMORY' || /WebAssembly\.Memory\(\).*?(?:could not allocate|allocation failed)|(?:out of memory|Cannot enlarge memory arrays)/i.test(error?.message || String(error));
+  return error?.code === 'WASM_MEMORY' || /WebAssembly\.Memory\(\).*?(?:could not allocate|allocation failed)|out of memory|Cannot enlarge memory arrays|Array buffer allocation failed|Cannot allocate memory|std::bad_alloc|Aborted\(OOM\)/i.test(error?.message || String(error));
 }
 
 export function memoryError(error) {

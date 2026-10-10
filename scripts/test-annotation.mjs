@@ -10,6 +10,13 @@ const root=fileURLToPath(new URL('../',import.meta.url)),out=path.join(root,'tes
 const full=process.argv.includes('--full-db'),channel=process.env.BROWSER_CHANNEL||'chrome';
 const demo=JSON.parse(await readFile(path.join(root,'public/examples/expected.json'),'utf8'));
 const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}`;
+let injectedClient;
+const serve=server.listeners('request')[0];server.removeListener('request',serve);
+server.on('request',(req,res)=>{
+  if(injectedClient&&req.url==='/get-consensus/tool-client.mjs') {
+    res.writeHead(200,{'Content-Type':'text/javascript','Cache-Control':'no-cache','Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'require-corp','Cross-Origin-Resource-Policy':'same-origin'});res.end(injectedClient);
+  } else serve(req,res);
+});
 let browser;
 try {
   browser=await chromium.launch({...(channel==='chromium'?{}:{channel}),headless:true});
@@ -24,7 +31,31 @@ try {
   page.setDefaultTimeout(600000);page.on('pageerror',error=>errors.push(error.message));
   await page.goto(base);await page.waitForFunction(()=>window.nap?.state.annotation && window.nap.state.consensus);
   const consensus=page.frame({name:'consensus-frame'}),annotation=page.frame({name:'annotation-frame'});
+  const finished=async()=>{await annotation.waitForFunction(()=>!window.napAnnotation.state.busy,null,{timeout:120000});assert.ok(await annotation.evaluate(()=>window.napAnnotation.result),await annotation.locator('#status').textContent());};
   assert.ok(consensus && annotation);assert.equal(await page.getByRole('tab').count(),3);
+  const autoBudget=await annotation.evaluate(()=>Number.isFinite(navigator.deviceMemory)&&navigator.deviceMemory>0?Math.max(1,Math.floor(navigator.deviceMemory*256)):512);
+  const autoParallel=await annotation.evaluate(()=>Number.isFinite(navigator.hardwareConcurrency)&&navigator.hardwareConcurrency>0?Math.max(1,Math.floor(navigator.hardwareConcurrency)):2);
+  assert.equal(await annotation.locator('#memory-mode').inputValue(),'auto');
+  assert.equal(Number(await annotation.locator('#memory-budget').inputValue()),autoBudget);
+  assert.equal(await annotation.locator('#memory-budget').evaluate(element=>element.readOnly),true);
+  await page.getByRole('tab',{name:/rRNA annotation/}).click();
+  assert.equal(await annotation.locator('#parallel-mode').inputValue(),'auto');
+  assert.equal(Number(await annotation.locator('#parallel-queries').inputValue()),autoParallel);
+  assert.equal(await annotation.locator('#parallel-queries').evaluate(element=>element.readOnly),true);
+  await annotation.locator('#parallel-mode').selectOption('manual');
+  await annotation.locator('#parallel-queries').fill('2');
+  await annotation.locator('#parallel-mode').selectOption('auto');
+  assert.equal(Number(await annotation.locator('#parallel-queries').inputValue()),autoParallel);
+  await annotation.locator('#parallel-mode').selectOption('manual');
+  assert.equal(await annotation.locator('#parallel-queries').inputValue(),'2');
+  await annotation.locator('#parallel-mode').selectOption('auto');
+  await annotation.locator('#memory-mode').selectOption('manual');
+  await annotation.locator('#memory-budget').fill('256');
+  await annotation.locator('#memory-mode').selectOption('auto');
+  assert.equal(Number(await annotation.locator('#memory-budget').inputValue()),autoBudget);
+  await annotation.locator('#memory-mode').selectOption('manual');
+  assert.equal(await annotation.locator('#memory-budget').inputValue(),'256','Manual value survives automatic mode');
+  await annotation.locator('#memory-mode').selectOption('auto');
   await page.getByRole('tab',{name:/get-consensus/}).click();
   await consensus.evaluate(samples=>window.napConsensus.setFiles(samples.map((sample,index)=>new File([Array.from({length:6},(_,read)=>`@test_${index}_${read}\n${sample.sequence}\n+\n${'I'.repeat(sample.sequence.length)}\n`).join('')],`sample_${index}.fq`))),demo.samples);
   await consensus.locator('#start').click();await consensus.waitForFunction(()=>!window.napConsensus.busy && window.napConsensus.result);
@@ -40,7 +71,8 @@ try {
   await annotation.locator('#reference-file').setInputFiles({name:'reference.fa',mimeType:'text/plain',buffer:Buffer.from(ref)});
   await annotation.locator('#taxonomy-file').setInputFiles({name:'reference.path',mimeType:'text/plain',buffer:Buffer.from(taxonomy)});
   await annotation.locator('#options details summary').click();await annotation.locator('input[name=shardBases]').fill('400');
-  await annotation.locator('#start').click();await annotation.waitForFunction(()=>!window.napAnnotation.state.busy && window.napAnnotation.result);
+  await annotation.locator('input[name=batchSize]').fill('1');
+  await annotation.locator('#start').click();await finished();
   const result=await annotation.evaluate(async()=>({manifest:window.napAnnotation.result.manifest,rows:window.napAnnotation.result.rows,input:await window.napAnnotation.result.files.get('all.cnt.seq.qual.txt').text()}));
   assert.equal(result.input,original,'Handoff retains complete seq/qual/count input bytes');
   assert.equal(result.manifest.execution.referenceVolumes,3);assert.equal(result.manifest.nap.stage,'get-consensus');
@@ -49,6 +81,31 @@ try {
   assert.deepEqual(result.rows.map(row=>row.counts).sort((a,b)=>a[0]-b[0]),[[0,6],[6,0]]);
   assert.equal(await annotation.locator('#progress').evaluate(element=>element.value),1);
   console.log('PASS actual get-consensus WASM -> exact seq.qual.txt handoff -> sharded BLAST WASM -> global LCA and sample counts');
+  console.log('Parallel execution:',JSON.stringify(result.manifest.execution.concurrency));
+  assert.equal(result.manifest.execution.concurrency.peak,2);
+  assert.equal(result.manifest.execution.concurrency.sharedReference,true);
+  assert.equal(result.manifest.execution.concurrency.memoryMode,'auto');
+  assert.equal(result.manifest.execution.concurrency.parallelMode,'auto');
+  assert.equal(result.manifest.execution.concurrency.requested,autoParallel);
+  assert.equal(result.manifest.execution.concurrency.memoryBudgetMB,autoBudget,'UI and pipeline worker resolve the same RAM budget');
+  const comparable=()=>annotation.evaluate(async()=>Object.fromEntries(await Promise.all(['blast.tsv','blast.filtered.tsv','internalcontrol.blast.tsv','all.cnt.seq.qual.tax.txt','all.cnt.seq.qual.tax.sp.txt'].map(async name=>[name,await window.napAnnotation.result.files.get(name).text()]))));
+  const parallelFiles=await comparable();
+  console.log('PASS reading parallel result blobs');
+  await annotation.locator('#parallel-mode').selectOption('manual');
+  await annotation.locator('input[name=parallelQueries]').fill('1');
+  await annotation.locator('#start').click();await finished();
+  assert.deepEqual(await comparable(),parallelFiles,'Actual sequential and parallel BLAST outputs/classifications/counts are identical');
+  console.log('PASS actual sequential/parallel result equality');
+  await annotation.locator('#parallel-mode').selectOption('auto');
+  const toolClient=await readFile(path.join(root,'public/get-consensus/tool-client.mjs'),'utf8');
+  const injected=toolClient.replace("if (signal?.aborted)","if (tool === 'blastn' && !globalThis.annotationTestMemoryFailure) { globalThis.annotationTestMemoryFailure = true; return Promise.reject(Object.assign(new Error('WebAssembly.Memory(): could not allocate memory'), { code: 'WASM_MEMORY' })); }\n    if (signal?.aborted)");
+  injectedClient=injected;
+  await annotation.locator('#start').click();await finished();
+  assert.deepEqual(await comparable(),parallelFiles,'Simulated allocation failure retries produce identical real WASM classifications/counts');
+  assert.equal(await annotation.evaluate(()=>window.napAnnotation.result.manifest.execution.concurrency.memoryRetries),1);
+  assert.equal(await annotation.evaluate(()=>window.napAnnotation.result.manifest.execution.concurrency.finalLimit),1);
+  injectedClient=undefined;
+  console.log('PASS concurrent native BLAST with shared immutable DB, sequential result equality and memory-failure reduction/retry');
   const event=page.waitForEvent('download');await annotation.locator('#zip').click();await (await event).saveAs(path.join(out,'annotation-results.zip'));
   const archive=unzipSync(await readFile(path.join(out,'annotation-results.zip')));
   assert.equal(strFromU8(archive['all.cnt.seq.qual.txt']),original);
@@ -65,6 +122,8 @@ try {
   assert.equal(await annotation.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:path.join(out,'annotation-mobile.png'),fullPage:true});await page.setViewportSize({width:1440,height:1000});
   await annotation.locator('#start').click();await annotation.waitForFunction(()=>window.napAnnotation.state.busy);
+  assert.equal(await annotation.locator('#memory-mode').isDisabled(),true);
+  assert.equal(await annotation.locator('#parallel-mode').isDisabled(),true);
   assert.equal(await page.locator('#transfer-consensus').isDisabled(),true);
   const overwrite=await annotation.evaluate(()=>{try {window.napAnnotation.setTable(new File([''],'empty.txt'));return false;}catch(error){return /解析中/.test(error.message);}});assert.equal(overwrite,true);
   await annotation.locator('#cancel').click();await annotation.waitForFunction(()=>!window.napAnnotation.state.busy);
@@ -122,4 +181,4 @@ try {
     console.log('PASS full container reference: 1,599,178 sequences / 4,479,942,144 bases / 36 volumes, taxonomy/control/No Hit/grouped counts exactly equal native scripts');
   }
   assert.deepEqual(errors,[]);
-} finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
+} finally {server.closeAllConnections();await browser?.close();await new Promise(resolve=>server.close(resolve));}

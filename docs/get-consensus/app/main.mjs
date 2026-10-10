@@ -1,10 +1,12 @@
+import { bindCpuParallelism } from '../../shared/parallel-settings.mjs';
 import { defaults,validateOptions } from './pipeline.mjs';
 import { makeZip } from './zip.mjs';
 import { workbook } from './workbook.mjs';
 import { alignmentViewer,viewerHtml } from './viewer.mjs';
 import { CONSENSUS_RESULT_PAGE,consensusResultPage } from './result-page.mjs';
 const $=s=>document.querySelector(s),form=$('#options');
-let selected=[],worker,result,busy=false,timer,started,viewer,history=[],xlsxUrl;
+bindCpuParallelism({mode:$('#parallel-mode'),input:form.elements.parallelSamples,hint:$('#parallel-hint'),manualDefault:defaults.parallelSamples});
+let selected=[],worker,result,busy=false,timer,started,viewer,history=[],xlsxUrl,txtUrl;
 let generation=0,inputProvenance=null;
 const progressRows=new Map();
 const notifyState=()=>window.dispatchEvent(new Event('nap:consensus-state'));
@@ -54,6 +56,9 @@ async function finish(data,token,provenance) {
   if(provenance) {data.manifest.nap=provenance;data.files.set('run.json',new Blob([JSON.stringify(data.manifest,null,2)]));}
   result=data;$('#results').hidden=false;
   result.files.set('all.cnt.seq.qual.xlsx',excel);
+  if(txtUrl) URL.revokeObjectURL(txtUrl);
+  txtUrl=URL.createObjectURL(result.files.get('all.cnt.seq.qual.txt'));
+  $('#txt-download').href=txtUrl;$('#txt-download').hidden=false;
   if(xlsxUrl) URL.revokeObjectURL(xlsxUrl);
   xlsxUrl=URL.createObjectURL(result.files.get('all.cnt.seq.qual.xlsx'));
   $('#xlsx-download').href=xlsxUrl;$('#xlsx-download').hidden=false;
@@ -86,6 +91,8 @@ function chooseFiles(files,provenance=null) {
   generation++;selected=next;inputProvenance=provenance?structuredClone(provenance):null;
   resetProgress();
   result=null;viewer?.dispose();viewer=null;$('#results').hidden=true;$('#zip').disabled=true;
+  if(txtUrl) {URL.revokeObjectURL(txtUrl);txtUrl=null;}
+  $('#txt-download').removeAttribute('href');$('#txt-download').hidden=true;
   if(xlsxUrl) {URL.revokeObjectURL(xlsxUrl);xlsxUrl=null;}
   $('#xlsx-download').removeAttribute('href');$('#xlsx-download').hidden=true;
   $('#status').classList.remove('error');filesChanged();
@@ -104,6 +111,8 @@ $('#start').onclick=()=>{
   const token=++generation,provenance=inputProvenance?structuredClone(inputProvenance):null;
   try {
     const settings=options();if(!selected.length) throw Error('FASTQ を選択してください。');
+    if(txtUrl) {URL.revokeObjectURL(txtUrl);txtUrl=null;}
+    $('#txt-download').removeAttribute('href');$('#txt-download').hidden=true;
     if(xlsxUrl) {URL.revokeObjectURL(xlsxUrl);xlsxUrl=null;}
     $('#xlsx-download').removeAttribute('href');$('#xlsx-download').hidden=true;
     $('#status').classList.remove('error');$('#results').hidden=true;$('#zip').disabled=true;result=null;history=[];$('#log').textContent='';resetProgress();$('#consensus-progress-panel').hidden=false;setBusy(true);status('解析を開始しています…');

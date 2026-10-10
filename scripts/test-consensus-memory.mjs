@@ -58,6 +58,7 @@ try {
       let result;
       if (count === 300) {
         window.napConsensus.setFiles(files);
+        const mode=document.querySelector('[name=parallelMode]');mode.value='manual';mode.dispatchEvent(new Event('change'));
         for (const [key, value] of Object.entries({ parallelSamples: limit, maxReads: 3, minReads: 3 })) document.querySelector(`[name=${key}]`).value = value;
         document.querySelector('[name=haplotypes]').checked = false;
         document.getElementById('start').click();

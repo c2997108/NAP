@@ -31,8 +31,8 @@
         <label>バーコード被覆率<input id="barcode-coverage" type="number" min="0.01" max="1" step="0.01" value="0.9"></label>
         <label>バーコード一致率 (%)<input id="barcode-identity" type="number" min="0" max="100" step="1" value="90"></label>
       </div>
-      <div class="option-grid"><label>1バッチのリード数<input id="batch-size" type="number" min="1" max="10000" step="1" value="300"></label><label>同時処理ファイル数<input id="concurrency" type="number" min="1" max="16" step="1" value="8"></label></div>
-      <p class="hint">FASTQ ファイルごとに同時処理します。1 にすると順次処理します。</p>
+      <div class="option-grid"><label>1バッチのリード数<input id="batch-size" type="number" min="1" max="10000" step="1" value="300"></label><label>同時処理ファイル／バッチ数<select id="parallel-mode" aria-label="並列数の設定方法"><option value="auto">CPUコア数から自動</option><option value="manual">手動で指定</option></select><input id="concurrency" type="number" min="1" step="1" value="8" readonly><small id="parallel-hint" class="hint"></small></label></div>
+      <p class="hint">複数FASTQはファイルごとに、1ファイルの場合はバッチごとに同時処理します。1バッチは既定で300リードです。手動で1にすると順次処理します。メモリー確保に失敗した場合は並列数を減らして再試行します。</p>
       <div class="checks"><label><input id="expand" type="checkbox" checked> 縮重塩基を展開する</label><label><input id="suppress-chimeras" type="checkbox"> 低一致率のヒットもキメラ抑制に使う</label><label><input id="diagnostics" type="checkbox"> BLAST 判定根拠も保存する</label></div>
       <p class="hint">既定値は元スクリプトに合わせています。比較用設定は検索モードとバーコード一致率を変更します。分割デモは既定値で実行できます。</p>
     </section>
