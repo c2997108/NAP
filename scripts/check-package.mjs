@@ -130,6 +130,7 @@ assert.equal(pkg.version,lock.version);assert.equal(pkg.name,lock.name);
 const index=await readFile(path.join(root,'public/index.html'),'utf8');
 assert.ok(index.includes(`data-version="${pkg.version}"`),'Displayed NAP version must match package.json');
 assert.match(index,/data-build="[0-9a-f]{12}"/,'The displayed build ID must be generated before publishing');
+assert.match(index,/<time class="updated-at" datetime="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z">最終更新 \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} JST<\/time>/,'The displayed last update must include the date, time and time zone');
 assert.equal(pkg.devDependencies.playwright,lock.packages['node_modules/playwright'].version);
 const report={checkedAt:new Date().toISOString(),files:files.length,verifiedHashes:verified,
   checkedReferences:references,pagesFiles,pagesBytes,totalBytes:sizes.reduce((sum,file)=>sum+file.bytes,0),largest:sizes.slice(0,4)};

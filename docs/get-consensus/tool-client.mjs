@@ -18,11 +18,17 @@ export class ConsensusTools {
         if (data.error) reject(Object.assign(new Error(data.error), { code: data.code }));
         else resolve(data.result);
       };
-      worker.postMessage({ tool, args, files, outputs, stdin });
+      try { worker.postMessage({ tool, args, files, outputs, stdin }); }
+      catch (error) { done(); reject(error); }
     });
   }
   align(fasta, options = {}) {
-    const { args = ['--auto'], ...settings } = options;
+    const { args = ['--auto'], isolatedStages = false, ...settings } = options;
+    // On memory pressure, terminate each native MAFFT stage before starting
+    // the next. The normal path keeps its single worker and startup cost.
+    if (isolatedStages) return import('./mafft.mjs').then(({ alignMafft }) => alignMafft(fasta, args,
+      (tool, argv, files) => this.run(tool, argv, { ...files, signal: settings.signal }),
+      (command, detail) => settings.onProgress?.(detail || { command })));
     return this.run('mafft', args, { ...settings, stdin: fasta });
   }
 }

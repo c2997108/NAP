@@ -21,10 +21,24 @@ test('static version labels work without Git and repeated generation preserves t
   const html = await readFile(path.join(directory, 'public', 'index.html'), 'utf8');
   assert.equal(first.version, '1.0.0');
   assert.match(first.build, /^[0-9a-f]{12}$/);
+  assert.equal(new Date(first.updatedAt).toISOString(), first.updatedAt);
   assert.ok(html.includes(`data-version="1.0.0" data-build="${first.build}"`));
   assert.ok(html.includes(`v1.0.0<span class="build-id">ビルド ${first.build}</span>`));
   assert.deepEqual(await writeVersion(directory), first);
   assert.equal(await readFile(path.join(directory, 'public', 'index.html'), 'utf8'), html);
+});
+
+test('last update uses Japan time and changes only with the distributed contents', async t => {
+  const directory = await fixture(t);
+  const first = await writeVersion(directory, { now: new Date('2026-10-10T23:45:06.000Z') });
+  const html = await readFile(path.join(directory, 'public', 'index.html'), 'utf8');
+  assert.equal(first.updatedAt, '2026-10-10T23:45:06.000Z');
+  assert.ok(html.includes('<time class="updated-at" datetime="2026-10-10T23:45:06.000Z">最終更新 2026-10-11 08:45:06 JST</time>'));
+  assert.deepEqual(await writeVersion(directory, { now: new Date('2026-10-12T00:00:00.000Z') }), first);
+  await writeFile(path.join(directory, 'public', 'app', 'main.mjs'), 'export const ready = false;');
+  const changed = await writeVersion(directory, { now: new Date('2026-10-12T00:00:00.000Z') });
+  assert.notEqual(changed.build, first.build);
+  assert.equal(changed.updatedAt, '2026-10-12T00:00:00.000Z');
 });
 
 test('application files, binary assets and package version changes update the build ID', async t => {

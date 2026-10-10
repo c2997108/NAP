@@ -7,6 +7,8 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const versionBlock = /<!-- app-version:start -->[\s\S]*?<!-- app-version:end -->/g;
 const placeholder = '<!-- app-version:start --><!-- app-version:end -->';
 const escapeHtml = text => text.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+const validTimestamp = value => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+const japanTime = value => new Date(Date.parse(value) + 9 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ') + ' JST';
 
 async function publicFiles(directory, prefix = '') {
   const files = [];
@@ -20,7 +22,7 @@ async function publicFiles(directory, prefix = '') {
   return files;
 }
 
-export async function writeVersion(projectRoot = root) {
+export async function writeVersion(projectRoot = root, { now = new Date() } = {}) {
   const { version } = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8'));
   const directory = path.join(projectRoot, 'public');
   const indexPath = path.join(directory, 'index.html');
@@ -35,13 +37,17 @@ export async function writeVersion(projectRoot = root) {
     hash.update(name + '\0' + bytes.length + '\0').update(bytes);
   }
   const build = hash.digest('hex').slice(0, 12);
-  const label = `<!-- app-version:start --><span id="app-version" class="app-version" data-version="${escapeHtml(version)}" data-build="${build}" title="表示中のNAPのバージョンと配布ファイルのビルドID">v${escapeHtml(version)}<span class="build-id">ビルド ${build}</span></span><!-- app-version:end -->`;
+  // Keep the last update for identical contents, including when the server restarts.
+  const previous = html.match(versionBlock)[0];
+  const previousTime = /data-updated-at="([^"]+)"/.exec(previous)?.[1];
+  const updatedAt = previous.includes(`data-build="${build}"`) && validTimestamp(previousTime) ? previousTime : now.toISOString();
+  const label = `<!-- app-version:start --><span id="app-version" class="app-version" data-version="${escapeHtml(version)}" data-build="${build}" data-updated-at="${updatedAt}" title="表示中のNAPのバージョン・配布ファイルのビルドID・最終更新日時（日本標準時）">v${escapeHtml(version)}<span class="build-id">ビルド ${build}</span><time class="updated-at" datetime="${updatedAt}">最終更新 ${japanTime(updatedAt)}</time></span><!-- app-version:end -->`;
   const updated = html.replace(versionBlock, () => label);
   if (updated !== html) await writeFile(indexPath, updated);
-  return { version, build };
+  return { version, build, updatedAt };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { version, build } = await writeVersion();
-  console.log(`NAP v${version} · ビルド ${build}`);
+  const { version, build, updatedAt } = await writeVersion();
+  console.log(`NAP v${version} · ビルド ${build} · 最終更新 ${japanTime(updatedAt)}`);
 }

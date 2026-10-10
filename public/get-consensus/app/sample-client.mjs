@@ -14,7 +14,8 @@ export class ConsensusSamples {
         if (data.error) reject(Object.assign(new Error(data.error.message), { name: data.error.name, code: data.error.code }));
         else resolve(data.result);
       };
-      worker.postMessage({ kind, ...payload });
+      try { worker.postMessage({ kind, ...payload }); }
+      catch (error) { done(); reject(error); }
     });
   }
 }

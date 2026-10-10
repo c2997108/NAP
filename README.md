@@ -4,7 +4,7 @@ Nanopore アンプリコンの FASTQ 分割、コンセンサス生成、参照�
 
 公開WEBページ： https://c2997108.github.io/NAP/
 
-画面上部のアプリ名の横に、現在表示しているNAPのバージョン番号とビルドIDを表示します。番号は `package.json` の `version`、ビルドIDは配布ファイルの内容から生成するため、同じ番号でも更新された画面を識別できます。`npm start` と `npm run prepare:pages` で自動更新され、GitHub Pagesにも同じ表示が含まれます。
+画面上部のアプリ名の横に、現在表示しているNAPのバージョン番号・ビルドID・最終更新日時（JST）を表示します。番号は `package.json` の `version`、ビルドIDは配布ファイルの内容から生成するため、同じ番号でも更新された画面を識別できます。最終更新日時は、その内容を `npm start` または `npm run prepare:pages` で初めて生成した日時です。同じ内容で再起動・再生成しても日時は変わりません。GitHub Pagesにも同じ表示が含まれます。
 
 基になった処理は OpenPortablePipeline の [nanopore~split-barcode](https://github.com/c2997108/OpenPortablePipeline/blob/53c159aeedff6038f0fe5ab032bdd4f064067483/PortablePipeline/scripts/nanopore~split-barcode) と [nanopore~get-consensus](https://github.com/c2997108/OpenPortablePipeline/blob/53c159aeedff6038f0fe5ab032bdd4f064067483/PortablePipeline/scripts/nanopore~get-consensus) です。NCBI BLAST、MAFFT、VSEARCH、CD-HIT、minimap2、samtools を WebAssembly で実行します。
 
@@ -235,7 +235,13 @@ FASTQの読み込み・品質別クラスタリングの準備・結果の解析
 
 解析済みサンプルの全リードをBLASTまで保持せず、サンプルWorkerの終了時に解放します。BLAST集計では元のFASTQを再読み込みし、バッチ分の配列だけを保持します（重複ID検査用のID集合は保持します）。gzip入力はこの段階で再び展開します。ツールの標準出力は固定サイズのバイト配列で受け取り、大きなSAMやpileupをJavaScriptの数値配列に溜めません。
 
+ハプロタイプ判定用のリード名付きpileupは、判定に使う変異位置だけを `samtools mpileup -l` で出力します。BAMは従来どおり順に走査し、深度上限8000・フラグ・品質フィルターは保持します。全位置のリード名と位置ごとのID集合を保持する必要がなくなり、通常の変異判定用 `round3.mpileup` は従来どおり保存します。
+
+MAFFTは通常、従来と同じ1つのWorkerで全段階を実行します。メモリー確保に失敗した場合だけ、各段階を個別のWorkerで実行・終了してから次へ進む方法で再試行し、そのサンプル内では以後もこの方法を使用します。整列の入力・アルゴリズム・引数は変更しません。BLAST集計は、確保に失敗したバッチだけを半分に分け、成功したリードを重複計上せずに再試行します。縮小したバッチサイズはそのサンプルの残りの検索にも適用します。MAFFTの `Allocation error` / `Cannot allocate ...` などのネイティブ側の診断もメモリー不足として扱います。これらの復旧は `run.json` の警告に記録します。メモリーが十分な実行ではWorker数・バッチサイズを下げません。
+
 WASMのメモリー確保が失敗した場合は、同時処理上限を半分に下げ、起動済みジョブが減ってから失敗したサンプルを再試行します。完了済みサンプルと検索条件は保持し、低下した上限は後段のBLASTにも適用します。実効上限・再試行回数・警告は`run.json`に記録します。単独のジョブでも確保できない場合は、有限回の再試行後に理由を表示して停止します。入力ファイルの分割や並列数の低下が必要になる場合があります。ブラウザのプロセス自体が終了した場合の自動復旧はできません。
+
+`npm run test:consensus-recovery` は、実際のWASMでMAFFTの確保失敗後の整列一致とWorker解放、全位置／変異位置限定pileupのリード・深度・ハプロタイプ一致を確認します。単体テストではBLASTのバッチ縮小、重複のない集計、単一リードでも失敗する場合の有限停止を検証します。
 
 全体とサンプル別のプログレスバーを表示します。読み込み済みの入力サイズ、品質別クラスタリングの処理済みビン、各クラスターのMAFFT段階と完了数、マッピング・ハプロタイプの完了段階、BLAST集計済みのリード数で進捗を更新します。全サンプル統合・代表配列の整列・データベース生成も全体進捗に含めます。並列ジョブの開始だけでは進まず、Excelと結果画面の生成が完了して100%になります。段階の重みと入力ファイルサイズによる集計なので、残り時間の見積もりではありません。ツールが内部進捗を報告できない処理は、その段階の完了までバーを保持します。
 

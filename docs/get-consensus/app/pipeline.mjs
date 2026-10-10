@@ -2,12 +2,13 @@ import { ConsensusTools } from '../tool-client.mjs';
 import { readFastq,streamFastq,fasta,fastq,parseFasta,parseUc,consensus,decode,sampleName,safeName,compare } from './sequence.mjs';
 import { qualityClusters } from './qcluster.mjs';
 import { callVariants,vcf } from './variants.mjs';
-import { haplotypes } from './haplotype.mjs';
+import { haplotypes,phasePositions } from './haplotype.mjs';
 import { mapParallel } from './parallel.mjs';
 import { ConsensusProgress } from './progress.mjs';
 import { ConsensusSamples } from './sample-client.mjs';
 import { fileParallelPlan } from '../../shared/parallel-settings.mjs';
 import { toolScope } from './tool-scope.mjs';
+import { isMemoryAllocationError } from './memory.mjs';
 export const defaults={firstIdentity:.97,minReads:3,maxReads:30,secondIdentity:.99,allIdentity:1,blastIdentity:.9,minBitscore:200,minDepth:30,batchSize:300,parallelMode:'auto',parallelSamples:8,strand:'plus',adjustDirection:false,haplotypes:true};
 export function validateOptions(options={}) {
   const o={...defaults,...options};
@@ -121,7 +122,7 @@ export class ConsensusPipeline {
         if(called.variants.length) {
           const sam=await run('samtools',['view','-h','reads.bam'],{files:shared});
           step('mapping',.8,'ハプロタイプ用SAM生成完了');
-          const phase=await run('samtools',['mpileup','-f','ref.fa','-q','0','-Q','0','-B','-A','-d','8000','--output-QNAME','reads.bam'],{files:shared});
+          const phase=await run('samtools',['mpileup','-f','ref.fa','-q','0','-Q','0','-B','-A','-d','8000','--output-QNAME','-l','variants.positions','reads.bam'],{files:{...shared,'variants.positions':phasePositions(called.variants)}});
           step('mapping',.85,'ハプロタイプ用pileup完了');
           const haps=haplotypes(sam.stdout,called.variants,references,{minDepth:o.minDepth,phasePileup:phase.stdout});
           save(`${work}/round3-haplotypes.debug.json`,JSON.stringify(haps.debug,null,2));
@@ -144,21 +145,30 @@ export class ConsensusPipeline {
       return {local:{files:local.files,logs:local.logs,warnings:local.warnings},sample,entries,ties};
   }
   async searchSample({file,name,sample,dbFiles},o,signal,onProgress=()=>{}) {
-    const local=toolScope(this.tools,{label:name,signal,options:o,onProgress,onCommand:()=>onProgress({command:true})}),{save,run}=local;
-    const counts=new Map();let batch=[],completed=0,part=0;
-    const flush=async()=>{
-      if(!batch.length)return;
-      const end=completed+batch.length;
+    const local=toolScope(this.tools,{label:name,signal,options:o,onProgress,onCommand:()=>onProgress({command:true})}),{save,run,warn}=local;
+    const counts=new Map();let batch=[],completed=0,part=0,batchLimit=o.batchSize;
+    const search=async records=>{
+      const end=completed+records.length;
       onProgress({message: name+': BLAST '+(completed+1)+'〜'+end+' / '+sample.reads+' reads'});
-      const result=await run('blastn',['-db','db','-query','query.fa','-num_threads','1','-outfmt','6 qseqid sseqid qlen slen pident length mismatch gapopen qstart qend sstart send evalue bitscore staxids stitle'],{files:{...dbFiles,'query.fa':fasta(batch)}});
+      let result;
+      try {
+        result=await run('blastn',['-db','db','-query','query.fa','-num_threads','1','-outfmt','6 qseqid sseqid qlen slen pident length mismatch gapopen qstart qend sstart send evalue bitscore staxids stitle'],{files:{...dbFiles,'query.fa':fasta(records)}});
+      } catch(error) {
+        signal?.throwIfAborted();
+        if(!isMemoryAllocationError(error) || records.length===1)throw error;
+        const half=Math.ceil(records.length/2);batchLimit=Math.min(batchLimit,half);
+        warn(`メモリー不足: BLASTの${records.length}リードを${half}リード以下に分けて再試行します。`);
+        await search(records.slice(0,half));await search(records.slice(half));return;
+      }
       save('work-blast/'+name+'/part'+String(++part).padStart(4,'0')+'.blastn',result.stdout);
       const assignment=blastCounts(result.stdout,o);sample.assigned+=assignment.assigned;
       for(const [id,count] of assignment.counts)counts.set(id,(counts.get(id)||0)+count);
-      completed=end;batch=[];
+      completed=end;
       onProgress({step:{stage:'blast',fraction:completed/sample.reads,detail:completed+'/'+sample.reads+' reads 処理済み',extra:{processedReads:completed}},message:name+': BLAST '+completed+'/'+sample.reads+' reads 完了'});
     };
+    const flush=async()=>{if(batch.length){await search(batch);batch=[];}};
     onProgress({step:{stage:'blast',fraction:0,detail:'BLAST用にFASTQを再読込',extra:{processedReads:0}},message:name+': BLAST用にFASTQを再読込'});
-    for await(const record of streamFastq(file,{signal})){batch.push(record);if(batch.length===o.batchSize)await flush();}
+    for await(const record of streamFastq(file,{signal})){batch.push(record);if(batch.length>=batchLimit)await flush();}
     await flush();
     if(completed!==sample.reads)throw Error(file.name+': 再読込時のリード数が変化しました。');
     save('work-blast/'+name+'.cnt','id\t'+name+'\n'+[...counts].sort((a,b)=>b[1]-a[1] || compare(a[0],b[0])).map(([id,n])=>id+'\t'+n+'\n').join(''));

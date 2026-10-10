@@ -6,6 +6,11 @@ export function parseSam(text) {
     const f=line.split('\t'); return {id:f[0],flag:Number(f[1]),chrom:f[2],pos:Number(f[3]),mapq:Number(f[4]),cigar:f[5],seq:f[9],qual:f[10]};
   });
 }
+// samtools -l uses 1-based positions. Keep the same streamed BAM traversal,
+// depth limit and flag filters, but emit read names only at called variants.
+export function phasePositions(variants) {
+  return [...new Set(variants.map(v=>`${v.chrom}\t${v.pos}\n`))].join('');
+}
 export function alleleAt(read,v) {
   let reference=read.pos,query=0;
   const ops=[...read.cigar.matchAll(/(\d+)([MIDNSHP=X])/g)].map(m=>({n:Number(m[1]),op:m[2]}));
@@ -39,10 +44,12 @@ export function applyVariants(seq,vars,hap) {
 export function haplotypes(sam,variants,references,{minDepth=30,minFreq=.1,phasePileup=null}={}) {
   const reads=parseSam(sam).filter(r=>!(r.flag & (4|256|2048))),output=[],debug=[];
   const allowed=new Map();
+  const positions=new Set(variants.map(v=>`${v.chrom}:${v.pos}`));
   // samtools supplies the same HTSlib pileup depth/flag filtering as pysam's
   // stepper="all" (including the 8000-read depth limit).
   if(phasePileup!==null) for(const line of phasePileup.trim().split('\n')) {
-    const f=line.split('\t'); if(f.length>=7) allowed.set(`${f[0]}:${f[1]}`,new Set(f[6].split(',')));
+    const f=line.split('\t'),key=`${f[0]}:${f[1]}`;
+    if(f.length>=7 && positions.has(key)) allowed.set(key,new Set(f[6].split(',')));
   }
   const byChrom=new Map();
   for(const v of variants) { if(!byChrom.has(v.chrom)) byChrom.set(v.chrom,[]); byChrom.get(v.chrom).push(v); }

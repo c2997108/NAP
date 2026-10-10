@@ -17,10 +17,15 @@ const workerSources = new Map(await Promise.all(['app/pipeline-worker.mjs', 'app
   const pathname = '/get-consensus/' + name;
   return [pathname, audit + await readFile(new URL('../public' + pathname, import.meta.url), 'utf8')];
 })));
+let injectAllocationFailure = false, injected = 0;
+const runtime = await readFile(new URL('../public/get-consensus/wasm/vsearch.mjs', import.meta.url), 'utf8');
 const server = createServer(), staticHandler = server.listeners('request')[0];
 server.removeListener('request', staticHandler);
 server.on('request', (req, res) => {
-  const body = workerSources.get(new URL(req.url, 'http://localhost').pathname);
+  const pathname = new URL(req.url, 'http://localhost').pathname;
+  const body = injectAllocationFailure && pathname === '/get-consensus/wasm/vsearch.mjs'
+    ? injected++ < 2 ? runtime.replace('async function(moduleArg = {}) {', 'async function(moduleArg = {}) { if (globalThis.self?.name !== "em-pthread") throw new RangeError("WebAssembly.Memory(): could not allocate memory");') : runtime
+    : workerSources.get(pathname);
   if (!body) return staticHandler(req, res);
   res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cross-Origin-Embedder-Policy': 'require-corp', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Resource-Policy': 'same-origin', 'Cache-Control': 'no-store' });
   res.end(body);
@@ -84,27 +89,24 @@ try {
   };
   const serial = await run(8, 1), parallel = await run(8, 8);
   assert.equal(parallel.hash, serial.hash);
-  assert.equal(parallel.manifest.concurrency.samplePeak, 8);
-  assert.equal(parallel.manifest.concurrency.blastPeak, 8);
+  assert.equal(parallel.manifest.concurrency.samplePeak, parallel.manifest.concurrency.limit);
+  assert.equal(parallel.manifest.concurrency.blastPeak, parallel.manifest.concurrency.limit);
   assert.ok(parallel.manifest.samples.every(sample => sample.assigned === 3 && !('input' in sample)));
-  console.log(`PASS 8 real WASM sample workers match serial output (${Math.round(serial.elapsedMs)} ms vs ${Math.round(parallel.elapsedMs)} ms)`);
+  console.log(`PASS ${parallel.manifest.concurrency.limit} real WASM sample workers match serial output (${Math.round(serial.elapsedMs)} ms vs ${Math.round(parallel.elapsedMs)} ms)`);
 
   // Simulate the allocation exception at the VSEARCH factory entry. Preserve
   // pthread startup: that worker imports the same module as the main instance.
   // Only test HTTP responses change; shipped binaries and source stay untouched.
-  let injected = 0;
-  const runtime = await readFile(new URL('../public/get-consensus/wasm/vsearch.mjs', import.meta.url), 'utf8');
-  await page.route('**/wasm/vsearch.mjs', async route => {
-    const body = injected++ < 2 ? runtime.replace('async function(moduleArg = {}) {', 'async function(moduleArg = {}) { if (globalThis.self?.name !== "em-pthread") throw new RangeError("WebAssembly.Memory(): could not allocate memory");') : runtime;
-    await route.fulfill({ contentType: 'text/javascript', body });
-  });
+  // Serve the fault at HTTP level: routing every live debugger target can
+  // hang on retained, already terminated nested workers in desktop Chrome.
+  injectAllocationFailure = true;
   const recovered = await run(8, 8);
   assert.equal(recovered.hash, serial.hash);
   assert.ok(recovered.manifest.concurrency.memoryRetries >= 1);
   assert.ok(recovered.manifest.concurrency.effectiveLimit < 8);
   assert.ok(recovered.manifest.warnings.some(warning => warning.includes('メモリー不足')));
   assert.ok(recovered.states.some(state => state.limit < 8 && state.memoryRetries > 0));
-  await page.unroute('**/wasm/vsearch.mjs');
+  injectAllocationFailure = false;
   console.log('PASS VSEARCH allocation failure reduces concurrency, retries failed samples and preserves sequences/counts');
 
   const qualitySerial = await run(4, 1, true), qualityParallel = await run(4, 4, true);
@@ -114,8 +116,8 @@ try {
 
   const stress = await run(300, 16);
   assert.equal(stress.manifest.samples.length, 300);
-  assert.equal(stress.manifest.concurrency.samplePeak, 16);
-  assert.ok(stress.manifest.concurrency.blastPeak >= 1 && stress.manifest.concurrency.blastPeak <= 16);
+  assert.equal(stress.manifest.concurrency.samplePeak, stress.manifest.concurrency.limit);
+  assert.ok(stress.manifest.concurrency.blastPeak >= 1 && stress.manifest.concurrency.blastPeak <= stress.manifest.concurrency.limit);
   assert.deepEqual(stress.sequences, expected.samples.map(sample => sample.sequence).sort());
   assert.ok(stress.manifest.samples.every(sample => sample.reads === 3 && sample.assigned === 3 && !('input' in sample)));
   assert.equal(stress.manifest.representatives, 2);
@@ -127,6 +129,6 @@ try {
   assert.equal(created, terminated, 'All constructed sample/tool/pthread workers terminated');
   assert.ok(samples >= 600); assert.ok(tools >= stress.manifest.commands); assert.equal(pipelines, 1);
   assert.equal(unfinishedChildren, 0, 'Finished/error jobs terminate owned child workers');
-  console.log(`PASS 300 FASTQ files at 16 concurrent samples: 900 reads, two representatives, worker cleanup (${Math.round(stress.elapsedMs / 1000)} s)`);
+  console.log(`PASS 300 FASTQ files at ${stress.manifest.concurrency.limit} concurrent samples: 900 reads, two representatives, worker cleanup (${Math.round(stress.elapsedMs / 1000)} s)`);
   await writeFile(new URL('consensus-memory-report.json', output), JSON.stringify({ testedAt: new Date().toISOString(), browser: browser.version(), syntheticReadsPerFile: 3, serial, parallel, recovered, qualitySerial, qualityParallel, stress, errors, workerAudit }, null, 2) + '\n');
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
