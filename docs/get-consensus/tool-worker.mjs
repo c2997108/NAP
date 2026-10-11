@@ -51,7 +51,7 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
   const input = typeof stdin === 'string' ? encoder.encode(stdin) : stdin;
   const stdout = new ByteOutput(), stderr = new ByteOutput();
   let inputIndex = 0;
-  let instance;
+  let instance, pthreadWorkers = [];
   try {
     instance = await createTool({ noInitialRun: true,
       locateFile: name => new URL(directory + name, import.meta.url).href,
@@ -72,6 +72,9 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
         }
       }], print: line => stdout.write(encoder.encode(line + '\n')),
       printErr: line => stderr.write(encoder.encode(line + '\n')) });
+    // Pthread event handlers close over the module and its shared memory.
+    // Keep the helpers even if callMain empties Emscripten's worker pool.
+    pthreadWorkers = [...(instance.PThread?.runningWorkers || []), ...(instance.PThread?.unusedWorkers || [])];
     let exitCode = 0;
     try { exitCode = instance.callMain(checkedArgs) ?? 0; }
     catch (error) {
@@ -93,7 +96,13 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
       if (instance.FS.analyzePath(file).exists) resultFiles[name] = instance.FS.readFile(file).slice();
     }
     return { exitCode, stdout: stdout.text(), stderr: stderr.text(), files: resultFiles };
-  } finally { instance?.PThread?.terminateAllThreads(); }
+  } finally {
+    try { instance?.PThread?.terminateAllThreads(); }
+    finally {
+      for (const worker of pthreadWorkers) { worker.onmessage = null; worker.onerror = null; }
+      instance = null;
+    }
+  }
 }
 self.onmessage = async ({ data }) => {
   try {
