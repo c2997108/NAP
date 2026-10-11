@@ -61,6 +61,14 @@ try {
     };
   });
   await page.goto(base + '/get-consensus/'); await page.waitForFunction(() => window.napConsensus);
+  // Playwright's recursive inspector attachments retain terminated pthread
+  // targets and their WASM address-space reservations on the Linux CI runner.
+  // This standalone page needs only DOM automation; audit actual Worker
+  // ownership above without attaching a debugger to every native worker.
+  // Use the original session: a public newCDPSession does not change its
+  // auto-attach setting. This adapter is tied to the pinned Playwright version.
+  const pageSession = page._connection.toImpl(page).delegate._mainFrameSession._client;
+  await pageSession.send('Target.setAutoAttach', { autoAttach: false, waitForDebuggerOnStart: false, flatten: true });
   const run = async (count, limit, quality = false) => {
     console.log(`START ${count} samples, concurrency ${limit}${quality ? ', quality bins' : ''}`);
     const before = await cdp.send('SystemInfo.getProcessInfo');
@@ -134,6 +142,7 @@ try {
   assert.ok(stress.manifest.samples.every(sample => sample.reads === 3 && sample.assigned === 3 && !('input' in sample)));
   assert.equal(stress.manifest.representatives, 2);
   assert.deepEqual(errors, []);
+  assert.equal(page.workers().length, 0, 'Stress test does not retain worker inspector sessions');
   assert.equal(await page.evaluate(() => window.__napTestWorkers.size), 0, 'All top-level workers terminated');
   const [created, terminated, tools, samples, pipelines, unfinishedChildren] = await page.evaluate(() => [...window.__napTestAudit]);
   const workerAudit = { created, terminated, tools, samples, pipelines, unfinishedChildren };
