@@ -22,9 +22,23 @@ export class FileProcessingSlot {
   initialize() { return this.request('initialize', this.configuration); }
   run(file, onProgress) { this.fileName = file.name; this.onProgress = onProgress; return this.request('run', { file }); }
   dispose() {
+    if (this.closing) return this.closing;
     this.disposed = true;
-    this.worker.terminate();
     for (const pending of this.pending.values()) pending.reject(new Error('ファイル処理を中止しました。'));
     this.pending.clear();
+    // Let the file worker explicitly terminate its BLAST child before ending
+    // the parent. A timeout still closes a crashed/unresponsive file worker.
+    this.closing = new Promise(resolve => {
+      const finish = (terminate = true) => {
+        clearTimeout(timer); if (terminate) this.worker.terminate();
+        this.worker.onmessage = this.worker.onerror = null;
+        this.configuration = this.onProgress = null; resolve();
+      };
+      const timer = setTimeout(finish, 1000);
+      this.worker.onmessage = ({ data }) => { if (data.type === 'disposed') finish(false); };
+      this.worker.onerror = finish;
+      try { this.worker.postMessage({ type: 'dispose' }); } catch { finish(); }
+    });
+    return this.closing;
   }
 }

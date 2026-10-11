@@ -60,6 +60,7 @@ try {
   assert.equal(navigations.length, 2, 'Only one automatic reload on first startup');
   assert.equal(new URL(page.url()).hash, '#get-consensus');
   assert.equal(await page.evaluate(() => document.querySelector('main').inert), false);
+  assert.ok(requests.every(request => !request.url.includes('/api/system-memory')), 'Static Pages hosting must not probe a local memory endpoint');
   assert.equal(await page.evaluate(() => history.state?.napIsolationReload), undefined);
   const registration = await page.evaluate(async () => {
     const reg = await navigator.serviceWorker.getRegistration();
@@ -70,6 +71,9 @@ try {
   const consensus = page.frames().find(frame => frame.url() === base + 'get-consensus/');
   const annotation = page.frames().find(frame => frame.url() === base + 'annotation/');
   assert.ok(split && consensus && annotation);
+  assert.equal(await consensus.locator('#memory-panel').isVisible(), true);
+  assert.equal(await consensus.locator('#memory-panel').evaluate(element => element.open), false);
+  assert.match(await consensus.locator('.memory-note').first().textContent(), /PCの空きRAM.*取得できません/);
   for (const frame of [page.mainFrame(), split, consensus, annotation]) {
     assert.equal(await frame.evaluate(() => crossOriginIsolated && typeof SharedArrayBuffer === 'function'), true);
   }

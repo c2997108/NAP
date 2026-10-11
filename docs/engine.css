@@ -9,3 +9,10 @@ main { max-width: 1320px; margin: 0 auto; padding: 12px 0 24px; }
 .split-run-actions .run { flex:1; }
 @media(max-width:720px) { .run-actions .next-stage { width:100%; } .split-run-actions .run { flex-basis:100%; } }
 @media(max-width:720px) { main { padding: 8px 0 20px; } .toolbar { flex-wrap:wrap; } }
+.memory-panel { padding:18px 22px; margin:0 0 16px; border:1px solid #d8e2db; border-radius:12px; background:#fff; color:#173e32; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
+.memory-panel>summary { cursor:pointer; padding:0; font-size:14px; font-weight:600; } .memory-panel summary:focus-visible { outline:2px solid #608b6c; outline-offset:3px; }
+.memory-panel+.run-panel,.memory-panel+.run,.memory-panel+.split-run-actions { margin-top:0; }
+.memory-heading { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:10px; margin-top:12px; } .memory-heading>div { display:flex; flex-wrap:wrap; gap:8px; } .memory-heading button { font-size:11px; padding:7px 10px; border:1px solid #d1ded5; border-radius:8px; background:#fff; color:#365b47; } .memory-heading button:hover { background:#e9f0eb; }
+.memory-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr)); gap:16px; margin:16px 0 12px; } .memory-grid>div { min-width:0; } .memory-grid dt { font-size:11px; color:#698271; } .memory-grid dd { margin:7px 0; font:600 20px ui-monospace,monospace; color:#173e32; } .memory-grid small { display:block; font-size:10px; color:#74877b; line-height:1.7; overflow-wrap:anywhere; }
+.memory-details { border-top:1px solid #e6ece6; padding-top:12px; font-size:11px; color:#698271; } .memory-details summary { cursor:pointer; }
+.memory-note { font-size:10px; color:#74877b; line-height:1.8; margin:10px 0 0; }

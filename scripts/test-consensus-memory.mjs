@@ -7,14 +7,15 @@ import { createServer } from './serve.mjs';
 const output = new URL('../test-results/', import.meta.url);
 await mkdir(output, { recursive: true });
 const expected = JSON.parse(await readFile(new URL('../public/examples/expected.json', import.meta.url), 'utf8'));
-// Instrument only test HTTP responses, including nested workers whose entry
-// requests are not exposed by Playwright's routing API. Nothing shipped changes.
+// Instrument only test HTTP responses to audit logical job ownership. Check
+// actual browser targets separately; nothing shipped changes.
 const audit = `const NativeWorker=globalThis.Worker,children=new Set();
 self.addEventListener('message',({data})=>{if(data.__napTestAudit)globalThis.__napTestAudit=new Int32Array(data.__napTestAudit);});
 globalThis.Worker=class extends NativeWorker{
-  constructor(...args){super(...args);children.add(this);this.childAudit=new Int32Array(new SharedArrayBuffer(24));Atomics.add(globalThis.__napTestAudit,0,1);}
+  constructor(...args){super(...args);children.add(this);this.childAudit=new Int32Array(new SharedArrayBuffer(24));Atomics.add(globalThis.__napTestAudit,0,1);this.complete=({data})=>{if(!data.result&&!data.error)return;this.removeEventListener('message',this.complete);this.finishAudit();};this.addEventListener('message',this.complete);}
   postMessage(data,...args){return super.postMessage({...data,__napTestAudit:this.childAudit.buffer},...args);}
-  terminate(){if(children.delete(this)){for(let i=0;i<6;i++)Atomics.add(globalThis.__napTestAudit,i,Atomics.load(this.childAudit,i));this.childAudit=null;Atomics.add(globalThis.__napTestAudit,1,1);}return super.terminate();}
+  finishAudit(){if(children.delete(this)){for(let i=0;i<6;i++)Atomics.add(globalThis.__napTestAudit,i,Atomics.load(this.childAudit,i));this.childAudit=null;Atomics.add(globalThis.__napTestAudit,1,1);}}
+  terminate(){this.removeEventListener('message',this.complete);this.finishAudit();return super.terminate();}
 };
 const reportMessage=self.postMessage.bind(self);
 self.postMessage=(data,...args)=>{if(data.result||data.error){Atomics.add(globalThis.__napTestAudit,import.meta.url.endsWith('tool-worker.mjs')?2:import.meta.url.endsWith('sample-worker.mjs')?3:4,1);Atomics.add(globalThis.__napTestAudit,5,children.size);}return reportMessage(data,...args);};\n`;
@@ -22,15 +23,19 @@ const workerSources = new Map(await Promise.all(['app/pipeline-worker.mjs', 'app
   const pathname = '/get-consensus/' + name;
   return [pathname, audit + await readFile(new URL('../public' + pathname, import.meta.url), 'utf8')];
 })));
-let injectAllocationFailure = false, injected = 0;
 const runtime = await readFile(new URL('../public/get-consensus/wasm/vsearch.mjs', import.meta.url), 'utf8');
+let allocationFailures = 0;
 const server = createServer(), staticHandler = server.listeners('request')[0];
 server.removeListener('request', staticHandler);
 server.on('request', (req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
-  const body = injectAllocationFailure && pathname === '/get-consensus/wasm/vsearch.mjs'
-    ? injected++ < 2 ? runtime.replace('async function(moduleArg = {}) {', 'async function(moduleArg = {}) { if (globalThis.self?.name !== "em-pthread") throw new RangeError("WebAssembly.Memory(): could not allocate memory");') : runtime
-    : workerSources.get(pathname);
+  let body = workerSources.get(pathname);
+  // Serve the test-only exception directly: Playwright interception can stall
+  // module requests while short-lived workers are being disposed.
+  if (pathname === '/get-consensus/wasm/vsearch.mjs' && allocationFailures > 0) {
+    allocationFailures--;
+    body = runtime.replace('async function(moduleArg = {}) {', 'async function(moduleArg = {}) { if (globalThis.self?.name !== "em-pthread") throw new RangeError("WebAssembly.Memory(): could not allocate memory");');
+  }
   if (!body) return staticHandler(req, res);
   res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cross-Origin-Embedder-Policy': 'require-corp', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Resource-Policy': 'same-origin', 'Cache-Control': 'no-store' });
   res.end(body);
@@ -49,15 +54,15 @@ try {
     window.__napTestWorkers = active;
     window.__napTestAudit = new Int32Array(new SharedArrayBuffer(24));
     window.Worker = class extends NativeWorker {
-      constructor(...args) { super(...args); active.add(this); this.childAudit=new Int32Array(new SharedArrayBuffer(24)); Atomics.add(window.__napTestAudit, 0, 1); }
+      constructor(...args) { super(...args); active.add(this); this.childAudit=new Int32Array(new SharedArrayBuffer(24)); Atomics.add(window.__napTestAudit, 0, 1); this.complete=({data})=>{if(!data.result&&!data.error)return;this.removeEventListener('message',this.complete);this.finishAudit();};this.addEventListener('message',this.complete); }
       postMessage(data, ...args) { return super.postMessage({ ...data, __napTestAudit: this.childAudit.buffer }, ...args); }
-      terminate() {
+      finishAudit() {
         if (active.delete(this)) {
           for (let i=0;i<6;i++) Atomics.add(window.__napTestAudit,i,Atomics.load(this.childAudit,i));
           this.childAudit=null; Atomics.add(window.__napTestAudit, 1, 1);
         }
-        return super.terminate();
       }
+      terminate() { this.removeEventListener('message',this.complete);this.finishAudit();return super.terminate(); }
     };
   });
   await page.goto(base + '/get-consensus/'); await page.waitForFunction(() => window.napConsensus);
@@ -117,16 +122,14 @@ try {
   // Simulate the allocation exception at the VSEARCH factory entry. Preserve
   // pthread startup: that worker imports the same module as the main instance.
   // Only test HTTP responses change; shipped binaries and source stay untouched.
-  // Serve the fault at HTTP level: routing every live debugger target can
-  // hang on retained, already terminated nested workers in desktop Chrome.
-  injectAllocationFailure = true;
+  allocationFailures = 2;
   const recovered = await run(8, 8);
   assert.equal(recovered.hash, serial.hash);
   assert.ok(recovered.manifest.concurrency.memoryRetries >= 1);
   assert.ok(recovered.manifest.concurrency.effectiveLimit < 8);
   assert.ok(recovered.manifest.warnings.some(warning => warning.includes('メモリー不足')));
   assert.ok(recovered.states.some(state => state.limit < 8 && state.memoryRetries > 0));
-  injectAllocationFailure = false;
+  assert.equal(allocationFailures, 0);
   console.log('PASS VSEARCH allocation failure reduces concurrency, retries failed samples and preserves sequences/counts');
 
   const qualitySerial = await run(4, 1, true), qualityParallel = await run(4, 4, true);
@@ -150,6 +153,15 @@ try {
   assert.equal(created, terminated, 'All constructed sample/tool/pthread workers terminated');
   assert.ok(samples >= 600); assert.ok(tools >= stress.manifest.commands); assert.equal(pipelines, 1);
   assert.equal(unfinishedChildren, 0, 'Finished/error jobs terminate owned child workers');
+  let liveWorkers = [];
+  const deadline = Date.now() + 10000;
+  do {
+    liveWorkers = (await cdp.send('Target.getTargets')).targetInfos.filter(target => target.type === 'worker');
+    if (!liveWorkers.length) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  assert.deepEqual(liveWorkers.map(worker => worker.url), [], 'All 300-sample browser worker targets disappear without forced GC');
+  workerAudit.liveBrowserWorkers = liveWorkers.length;
   console.log(`PASS 300 FASTQ files at ${stress.manifest.concurrency.limit} concurrent samples: 900 reads, two representatives, worker cleanup (${Math.round(stress.elapsedMs / 1000)} s)`);
   await writeFile(new URL('consensus-memory-report.json', output), JSON.stringify({ testedAt: new Date().toISOString(), browser: browser.version(), syntheticReadsPerFile: 3, serial, parallel, recovered, qualitySerial, qualityParallel, stress, errors, workerAudit }, null, 2) + '\n');
 } catch (error) {

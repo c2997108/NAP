@@ -1,6 +1,8 @@
 import { defaults, validateOptions } from './core.mjs';
 import { memoryBudget, cpuParallelism } from './parallel.mjs';
-import { makeZip } from '../../get-consensus/app/zip.mjs';
+import { makeZipInWorker } from '../../shared/zip-client.mjs';
+import { resultBytes, retainedResultBytes } from '../../shared/result-memory.mjs';
+import { outputBlobs } from '../../shared/output-blob.mjs';
 const $ = id => document.getElementById(id);
 let tableFile, referenceFile, pathFile, dbFiles = [], provenance = null, worker, result, busy = false, generation = 0, timer, started;
 let manualBudgetMB = defaults.memoryBudgetMB;
@@ -62,7 +64,9 @@ function table(id, headers, rows) {
   element.append(body);
 }
 function download(name, blob) { const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+function releaseWorker(terminate = true) {if(worker){worker.onmessage=worker.onerror=null;if(terminate)worker.terminate();worker=null;}}
 function finish(data) {
+  data.files = outputBlobs(data.files);
   result = data; $('results').hidden = false;
   const s = result.manifest.summary;
   $('metrics').textContent = `${s.representatives} 代表配列 / ${s.annotated} 配列に分類情報 / ${s.internalControls} 内部コントロール / ${s.groups} 分類グループ`;
@@ -72,7 +76,7 @@ function finish(data) {
   $('outputs').replaceChildren();
   for (const [name, blob] of result.files) { const button = document.createElement('button'); button.className = 'file-button'; button.textContent = name; button.onclick = () => download(name, blob); $('outputs').append(button); }
   $('progress').value = 1; $('progress-value').textContent = '100% · 完了';
-  status(`分類解析が完了しました。${result.files.size} ファイルを保存できます。`); worker?.terminate(); worker = null; busyState(false);
+  status(`分類解析が完了しました。${result.files.size} ファイルを保存できます。`); busyState(false);
 }
 $('start').onclick = () => {
   if (busy || !tableFile) return;
@@ -83,18 +87,18 @@ $('start').onclick = () => {
     if (mode === 'folder' && !dbFiles.length) throw Error('参照DBフォルダーを選択してください。');
     clearResult(); const token = generation; busyState(true); $('progress-panel').hidden = false; status('分類解析を開始しています…');
     worker = new Worker(new URL('./pipeline-worker.mjs', import.meta.url), { type: 'module' });
-    const fail = error => { if (token !== generation) return; worker?.terminate(); worker = null; busyState(false); status(error.name === 'AbortError' ? '分類解析を中止しました。' : error.message,error.name !== 'AbortError'); };
+    const fail = error => { if (token !== generation) return; releaseWorker(); busyState(false); status(error.name === 'AbortError' ? '分類解析を中止しました。' : error.message,error.name !== 'AbortError'); };
     worker.onerror = event => fail(new Error(event.message));
     worker.onmessage = ({ data }) => {
       if (token !== generation) return;
       if (data.error) fail(data.error);
-      else if (data.result) finish(data.result);
+      else if (data.result) { releaseWorker(false); finish(data.result); }
       else if (data.progress) {
         const p = data.progress; $('progress').value = Math.max($('progress').value,p.fraction); $('progress-value').textContent = `${Math.floor($('progress').value * 100)}% · ${p.phase}`; $('progress-detail').textContent = p.detail;
         const line = `${p.phase}: ${p.detail}`; status(line); $('log').textContent += line + '\n';
       }
     };
-    worker.postMessage({ tableFile, mode, referenceFile, pathFile, dbFiles, options, provenance });
+    worker.postMessage({ tableFile, mode, referenceFile, pathFile, dbFiles, options, provenance, retainedBytes: retainedResultBytes('annotation') });
   } catch (error) { status(error.message,true); }
 };
 $('cancel').onclick = () => { $('cancel').disabled = true; status('分類解析を中止しています…'); worker?.postMessage({cancel:true}); };
@@ -104,7 +108,7 @@ $('save-xlsx').onclick = () => {
 };
 $('zip').onclick = async () => {
   $('zip').disabled = true;
-  try { download('annotation-results.zip', await makeZip([...result.files].map(([name,blob]) => ({ name,blob })))); }
+  try { download('annotation-results.zip', await makeZipInWorker([...result.files].map(([name,blob]) => ({ name,blob })))); }
   catch (error) { status(error.message,true); }
   finally { $('zip').disabled = false; }
 };
@@ -118,5 +122,5 @@ $('demo').onclick = async () => {
     $('reference-mode').value = 'fasta'; referenceMode(); status('合成デモを読み込みました。Demo分類の動作確認用データです。');
   } catch (error) { status(error.message,true); }
 };
-window.napAnnotation = { setTable, get result() { return result; }, get state() { return { busy, revision:generation, input:tableFile ? {name:tableFile.name,size:tableFile.size} : null, result:result?.manifest.summary }; } };
+window.napAnnotation = { setTable, get result() { return result; }, get state() { return { busy, revision:generation, resultBytes:resultBytes(result?.files), input:tableFile ? {name:tableFile.name,size:tableFile.size} : null, result:result?.manifest.summary }; } };
 referenceMode(); memorySettings(); parallelSettings(); controls();

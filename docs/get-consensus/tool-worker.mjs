@@ -1,6 +1,7 @@
 import { alignMafft } from './mafft.mjs';
 import { ByteOutput } from './app/byte-output.mjs';
 import { isMemoryAllocationError } from './app/memory.mjs';
+import { byteTransfers } from '../shared/output-blob.mjs';
 const commands = new Set(['vsearch', 'cd-hit', 'cd-hit-est', 'minimap2', 'samtools', 'blastn', 'makeblastdb',
   ...['tbfast','disttbfast','dvtditr','pairlocalalign','dndpre','makedirectionlist','setdirection','f2cl','countlen'].map(name => 'mafft-' + name)]);
 const encoder = new TextEncoder();
@@ -87,13 +88,13 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
         if (entry === '.' || entry === '..') continue;
         const full = directory + '/' + entry, name = prefix + entry;
         if (instance.FS.isDir(instance.FS.stat(full).mode)) walk(full, name + '/');
-        else resultFiles[name] = instance.FS.readFile(full).slice();
+        else resultFiles[name] = instance.FS.readFile(full);
       }
     }
     if (outputs === null) walk('/work');
     else for (const name of outputs) {
       const file = safePath(name);
-      if (instance.FS.analyzePath(file).exists) resultFiles[name] = instance.FS.readFile(file).slice();
+      if (instance.FS.analyzePath(file).exists) resultFiles[name] = instance.FS.readFile(file);
     }
     return { exitCode, stdout: stdout.text(), stderr: stderr.text(), files: resultFiles };
   } finally {
@@ -110,7 +111,8 @@ self.onmessage = async ({ data }) => {
     const result = tool === 'mafft'
       ? await alignMafft(options.stdin, args, callTool, (command, detail) => self.postMessage({ progress: detail || command }))
       : await callTool(tool, args, options);
-    self.postMessage({ result });
+    self.postMessage({ result }, byteTransfers(Object.values(result.files)));
   } catch (error) { self.postMessage({ error: error.stack || error.message || String(error), ...(isMemoryAllocationError(error) ? { code: 'WASM_MEMORY' } : {}) }); }
   finally { self.close(); }
 };
+import '../shared/worker-host.mjs';

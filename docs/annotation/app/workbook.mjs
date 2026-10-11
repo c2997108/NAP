@@ -1,4 +1,5 @@
 import { makeZip } from '../../get-consensus/app/zip.mjs';
+import { outputBlob } from '../../shared/output-blob.mjs';
 const xml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&apos;' }[c])).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
 function column(index) { let result = ''; for (index++; index; index = Math.floor((index - 1) / 26)) result = String.fromCharCode(65 + (index - 1) % 26) + result; return result; }
 export async function annotationWorkbook(result, warnings) {
@@ -12,5 +13,6 @@ export async function annotationWorkbook(result, warnings) {
     'xl/_rels/workbook.xml.rels':'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
     'xl/worksheets/sheet1.xml':sheet,
   };
-  return new Blob([await makeZip(Object.entries(files).map(([name, text]) => ({ name, blob: new Blob([text]) })))], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const archive = await makeZip(Object.entries(files).map(([name, text]) => ({ name, blob: outputBlob([text]) })), outputBlob);
+  return outputBlob([archive], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }

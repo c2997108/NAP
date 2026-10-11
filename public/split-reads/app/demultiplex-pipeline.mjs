@@ -131,7 +131,7 @@ export async function runPipeline({ fastqFiles, primerText, sampleText, options,
   phase = 'finalizing'; progress('ファイルの集計・出力準備');
   const rows = [...counts.values()].sort((a, b) => a.sample.localeCompare(b.sample)).map(row => sampleStatistics(row, distributions.get(row.sample)));
   const summary = { totalReads, assignedReads, unassignedReads: totalReads - assignedReads, segments, totalBases, batches, memoryRetries, samples: rows, primerSequences: prepared.primers.length, sampleDefinitions: prepared.samples.length, normalizedPrimerNames: prepared.normalized, elapsedMs: performance.now() - started };
-  const files = [...parts].map(([name, chunks]) => ({ name, blob: new Blob(chunks, { type: 'text/plain;charset=utf-8' }) })).sort((a, b) => a.name.localeCompare(b.name));
+  const files = [...parts].map(([name, chunks]) => ({ name, blob: outputBlob(chunks, { type: 'text/plain;charset=utf-8' }) })).sort((a, b) => a.name.localeCompare(b.name));
   if (includeReports) {
     files.push(...inputDefinitionFiles({ primerText, sampleText }));
     files.push(...reportFiles(summary, [...histogram.values()], { options: prepared.options, diagnostics, fastqFiles, primerText, sampleText, files }));
@@ -139,3 +139,4 @@ export async function runPipeline({ fastqFiles, primerText, sampleText, options,
   phase = 'complete'; progress('完了');
   return { summary, files, histogram: [...histogram.values()], distributions: [...distributions].map(([sample, distribution]) => serializeReadDistribution(sample, distribution)) };
 }
+import { outputBlob } from '../../shared/output-blob.mjs';

@@ -3,6 +3,7 @@ import { DEFAULT_OPTIONS, prepareInputs } from './demultiplex-core.mjs';
 import { createDefinitionEditor } from './definition-editor.mjs';
 import { bindCpuParallelism } from '../../shared/parallel-settings.mjs';
 import { distributionChart } from './distribution-chart.mjs';
+import { resultBytes, retainedResultBytes } from '../../shared/result-memory.mjs';
 const $ = id => document.getElementById(id);
 bindCpuParallelism({ mode: $('parallel-mode'), input: $('concurrency'), hint: $('parallel-hint'), manualDefault: DEFAULT_OPTIONS.concurrency });
 let fastqFiles = [], primerFile, sampleFile, busy = false, generation = 0, latest;
@@ -130,7 +131,7 @@ $('split').onclick = async () => {
     if (token !== generation) return;
     const prepared = prepareInputs(primerText, sampleText, getOptions());
     log(`入力: ${fastqFiles.length} ファイル / ${prepared.primers.length} プライマー / ${prepared.samples.length} サンプル定義`);
-    const result = await client.run({ fastqFiles, primerText, sampleText, options: prepared.options, diagnostics: $('diagnostics').checked });
+    const result = await client.run({ fastqFiles, primerText, sampleText, options: prepared.options, retainedBytes: retainedResultBytes('split-reads'), diagnostics: $('diagnostics').checked });
     if (token !== generation) return;
     showResult(result); status('完了');
   } catch (error) { if (token === generation) { status('エラー', true); log(error.message); } }
@@ -164,8 +165,8 @@ definitionEditor = createDefinitionEditor({ getFiles: () => ({ primerFile, sampl
 window.napDefinitions = definitionEditor;
 window.napSplit = {
   get state() {
-    return {busy,inputMode:definitionEditor.mode,revision:resultRevision,files:(latest?.summary.samples || []).map(sample=>({
-      name:`output/${sample.sample}.fq`,sample:sample.sample,reads:sample.segments,
+    return {busy,inputMode:definitionEditor.mode,revision:resultRevision,resultBytes:resultBytes(client.files) + (client.fastqReport?.size || 0),files:(latest?.summary.samples || []).map(sample=>({
+      name:`output/${sample.sample}.fq`,sample:sample.sample,reads:sample.segments,meanLength:sample.meanLength,
       size:latest.files.find(file=>file.name===`output/${sample.sample}.fq`)?.size || 0,
     }))};
   },

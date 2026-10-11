@@ -32,6 +32,7 @@ Do not copy the extracted project's old UI over NAP. Copy tool assets only:
 2. Copy the other generated `.mjs` / `.wasm` tool files and `vsearch.worker.mjs` into `public/get-consensus/wasm/`.
 3. Retain/update both complete notice files and the corresponding-source archive when sources or patches change.
 4. Recompute the four shared BLAST entries in `public/shared/wasm/manifest.json`. In the consensus manifest, keep local tools under `files`, the four BLAST entries under `sharedFiles` with `../../shared/wasm/` paths, and the archive checksum under `source`.
-5. Run `npm test` from the NAP root before distributing updated assets.
+5. Run `node scripts/patch-vsearch-runtime.mjs` to apply the VSEARCH mailbox compatibility fix and update its checksum. The pinned Emscripten runtime otherwise retains an infinite `Atomics.waitAsync` listener after shutdown ([upstream issue](https://github.com/emscripten-core/emscripten/issues/20920)). The patch uses its existing `postMessage` fallback and leaves the native binary unchanged; review/remove it when upgrading to an Emscripten release containing the upstream fix.
+6. Run `npm test` from the NAP root before distributing updated assets.
 
 The existing source-build tests are included in the archive. NAP's own integration tests check the combined application with its shipped binaries. Recompilation was not needed for this integration.

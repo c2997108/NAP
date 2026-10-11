@@ -1,5 +1,6 @@
 import { escapeHtml, scriptJson, fileHref, resultTable, settingsSection, filesSection, resultPage } from '../../shared/result-page.mjs';
 import { distributionChartSource } from './distribution-chart.mjs';
+import { outputBlob } from '../../shared/output-blob.mjs';
 
 export const SPLIT_RESULT_PAGE = 'split-barcode-results.html';
 const format = value => Number(value).toLocaleString('ja-JP', { maximumFractionDigits: 2 });
@@ -23,7 +24,7 @@ export function splitResultPage({ summary, options, fastqFiles, primerText = '',
 }
 
 export function inputDefinitionFiles({ primerText, sampleText }) {
-  return [['primer.fa', primerText], ['sample.txt', sampleText]].filter(([, text]) => typeof text === 'string').map(([name, text]) => ({ name, blob: new Blob([text], { type: 'text/plain;charset=utf-8' }) }));
+  return [['primer.fa', primerText], ['sample.txt', sampleText]].filter(([, text]) => typeof text === 'string').map(([name, text]) => ({ name, blob: outputBlob([text], { type: 'text/plain;charset=utf-8' }) }));
 }
 
 export function splitFastqArchiveFiles(files) {

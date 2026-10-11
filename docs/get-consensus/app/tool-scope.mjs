@@ -1,10 +1,11 @@
 import { fasta } from './sequence.mjs';
 import { isMemoryAllocationError } from './memory.mjs';
+import { outputBlob } from '../../shared/output-blob.mjs';
 
 export function toolScope(tools, { label = '', signal, options, onProgress = () => {}, onCommand = () => {} }) {
   const files = new Map(), logs = [], warnings = [];
   let isolatedMafft = false;
-  const save = (name, data) => files.set(name, new Blob([data]));
+  const save = (name, data) => files.set(name, outputBlob([data]));
   const emit = message => { signal?.throwIfAborted(); onProgress({ message: label ? `[${label}] ${message}` : message }); };
   const warn = message => { warnings.push(message); emit(message); };
   const run = async (tool, args, settings = {}) => {

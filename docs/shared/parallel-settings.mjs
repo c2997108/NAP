@@ -17,19 +17,20 @@ export function memoryBudget(options = {}, environment = globalThis.navigator ||
     automaticBudgetMB, deviceMemoryGB, source: mode === 'manual' ? 'manual' : deviceMemoryGB === null ? 'fallback' : 'device' };
 }
 
-export function fileParallelPlan({ parallelMode, parallelCount }, files, { readsInMemory = false, referenceBytes = 0, jobs = files.length, workingBytes = 0 } = {}, environment = globalThis.navigator || {}) {
+export function fileParallelPlan({ parallelMode, parallelCount }, files, { readsInMemory = false, referenceBytes = 0, jobs = files.length, workingBytes = 0, retainedBytes = 0 } = {}, environment = globalThis.navigator || {}) {
   const cpu = cpuParallelism({ parallelMode, parallelQueries: parallelCount }, environment);
   const memory = memoryBudget({}, environment);
   // Consensus holds one complete sample in JS and native memory; gzip's size
   // needs an allowance for expansion. Split streams batches instead. These
   // estimates guide scheduling; allocation failures still trigger a retry.
   const largestInput = readsInMemory ? files.reduce((largest, file) => Math.max(largest, file.size * (/\.gz$/i.test(file.name) ? 32 : 8)), 0) : 0;
-  const reservedBytes = 64 * MiB + referenceBytes + files.reduce((sum, file) => sum + file.size, 0);
+  retainedBytes = Math.max(0, Number(retainedBytes) || 0);
+  const reservedBytes = 64 * MiB + referenceBytes + retainedBytes + files.reduce((sum, file) => sum + file.size, 0);
   const workerBytes = 192 * MiB + referenceBytes * 3 + largestInput + workingBytes;
   const memoryLimit = Math.max(1, Math.floor((memory.budgetMB * MiB - reservedBytes) / workerBytes));
   return { ...cpu, limit: Math.max(1, Math.min(cpu.requested, cpu.cores, memoryLimit, jobs || 1)),
     memoryLimit, memoryBudgetMB: memory.budgetMB, budgetSource: memory.source, deviceMemoryGB: memory.deviceMemoryGB,
-    estimatedWorkerMB: Math.ceil(workerBytes / MiB), reservedMB: Math.ceil(reservedBytes / MiB) };
+    retainedResultMB: Math.ceil(retainedBytes / MiB), estimatedWorkerMB: Math.ceil(workerBytes / MiB), reservedMB: Math.ceil(reservedBytes / MiB) };
 }
 
 export function bindCpuParallelism({ mode, input, hint, manualDefault = 8 }, environment = globalThis.navigator || {}) {

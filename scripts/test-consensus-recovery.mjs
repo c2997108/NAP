@@ -38,9 +38,10 @@ try {
     const audit = new Int32Array(new SharedArrayBuffer(4)), NativeWorker=globalThis.Worker;
     let active=0,peak=0;
     globalThis.Worker=class extends NativeWorker {
-      constructor(...args){super(...args);active++;peak=Math.max(peak,active);this.disposed=false;}
+      constructor(...args){super(...args);active++;peak=Math.max(peak,active);this.disposed=false;this.complete=({data})=>{if(data.result||data.error)this.release();};this.addEventListener('message',this.complete);}
       postMessage(data,...args){super.postMessage({...data,__recoveryAudit:audit.buffer},...args);}
-      terminate(){if(!this.disposed){this.disposed=true;active--;}super.terminate();}
+      release(){if(!this.disposed){this.disposed=true;active--;this.removeEventListener('message',this.complete);}}
+      terminate(){this.release();super.terminate();}
     };
     const scope = toolScope(tools, {options:{adjustDirection:false}});
     const recovered = await scope.align(records);

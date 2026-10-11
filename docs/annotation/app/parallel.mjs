@@ -13,16 +13,17 @@ export function queryGroups(rows, batchSize, parallelQueries) {
   return groups;
 }
 
-export function parallelPlan(options, { referenceBytes = 0, inputBytes = 0, maxQueryBases = 0, groups = 1 } = {}, environment = globalThis.navigator || {}) {
+export function parallelPlan(options, { referenceBytes = 0, inputBytes = 0, maxQueryBases = 0, groups = 1, retainedBytes = 0 } = {}, environment = globalThis.navigator || {}) {
   const cpu = cpuParallelism(options, environment);
   const memory = memoryBudget(options, environment);
-  const reservedBytes = 64 * MiB + inputBytes * 8 + referenceBytes;
+  retainedBytes = Math.max(0, Number(retainedBytes) || 0);
+  const reservedBytes = 64 * MiB + inputBytes * 8 + referenceBytes + retainedBytes;
   // BLAST starts with a 64 MiB heap. Allow workspace/JS overhead plus private
   // MEMFS copies and heap growth; this is an estimate, not a hard RAM ceiling.
   const workerBytes = 192 * MiB + referenceBytes * 3 + maxQueryBases * 24;
   const memoryLimit = Math.max(1, Math.floor((memory.budgetMB * MiB - reservedBytes) / workerBytes));
   return { ...memory, ...cpu, limit: Math.max(1, Math.min(cpu.requested, cpu.cores, memoryLimit, groups)),
-    estimatedWorkerMB: Math.ceil(workerBytes / MiB), reservedMB: Math.ceil(reservedBytes / MiB) };
+    retainedResultMB: Math.ceil(retainedBytes / MiB), estimatedWorkerMB: Math.ceil(workerBytes / MiB), reservedMB: Math.ceil(reservedBytes / MiB) };
 }
 
 export function sharedReference(files) {

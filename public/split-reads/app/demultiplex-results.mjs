@@ -1,9 +1,10 @@
 import { createReadDistribution, mergeReadDistribution, sampleStatistics, QUALITY_METRIC } from './demultiplex-statistics.mjs';
 import { SPLIT_RESULT_PAGE, splitResultPage, inputDefinitionFiles, splitFastqArchiveFiles } from './result-page.mjs';
+import { outputBlob } from '../../shared/output-blob.mjs';
 
 export const UPSTREAM_COMMIT = '53c159aeedff6038f0fe5ab032bdd4f064067483';
 export const ASSIGNMENT_HEADER = 'read_id\tsegment\tsample\tleft_primer\tright_primer\tstart\tend\tstrand\tamplicon_length\ttrimmed_length\n';
-const textBlob = chunks => new Blob(chunks, { type: 'text/plain;charset=utf-8' });
+const textBlob = chunks => outputBlob(chunks, { type: 'text/plain;charset=utf-8' });
 
 export function reportFiles(summary, histogram, context) {
   const { options, diagnostics, fastqFiles, execution, files: outputFiles = [] } = context;
@@ -17,7 +18,7 @@ export function reportFiles(summary, histogram, context) {
     'run.json': JSON.stringify({ tool: 'webBLASTN nanopore split-barcode', blastVersion: '2.16.0', upstreamCommit: UPSTREAM_COMMIT, options, diagnostics, qualityMetric: QUALITY_METRIC, inputs: fastqFiles.map(file => ({ name: file.name, size: file.size })), ...(execution ? { execution } : {}), summary }, null, 2) + '\n'
   };
   const files = Object.entries(reports).map(([name, text]) => ({ name, blob: textBlob([text]) }));
-  files.push({ name: SPLIT_RESULT_PAGE, blob: new Blob([splitResultPage({ ...context, summary, files: [...outputFiles, ...files] })], { type: 'text/html;charset=utf-8' }) });
+  files.push({ name: SPLIT_RESULT_PAGE, blob: outputBlob([splitResultPage({ ...context, summary, files: [...outputFiles, ...files] })], { type: 'text/html;charset=utf-8' }) });
   return files;
 }
 
@@ -25,7 +26,7 @@ export function mergeFileResults(results, prepared, payload, execution, elapsedM
   const parts = new Map([['assignments.tsv', [ASSIGNMENT_HEADER]]]), counts = new Map(), bins = new Map(), distributions = new Map();
   let totalReads = 0, assignedReads = 0, segments = 0, totalBases = 0, batches = 0, memoryRetries = 0;
   // results are indexed by input position, so output order is independent of
-  // scheduling and completion order. Keep large FASTQ data as Blob parts.
+  // scheduling and completion order. Keep large FASTQ data as byte parts.
   for (const result of results) {
     const summary = result.summary;
     totalReads += summary.totalReads; assignedReads += summary.assignedReads;
@@ -60,6 +61,6 @@ export function mergeFileResults(results, prepared, payload, execution, elapsedM
   files.push({ name: 'primer-clean.fa', blob: textBlob([prepared.cleanFasta]) }, { name: 'primer-tags.fa', blob: textBlob([prepared.tagsFasta]) }, ...inputDefinitionFiles(payload));
   const context = { ...payload, options: prepared.options, execution, summary };
   files.push(...reportFiles(summary, [...bins.values()], { ...context, files }));
-  const fastqReport = new Blob([splitResultPage({ ...context, fastqOnly: true, files: splitFastqArchiveFiles(files) })], { type: 'text/html;charset=utf-8' });
+  const fastqReport = outputBlob([splitResultPage({ ...context, fastqOnly: true, files: splitFastqArchiveFiles(files) })], { type: 'text/html;charset=utf-8' });
   return { summary, files: files.sort((a, b) => a.name.localeCompare(b.name)), fastqReport };
 }

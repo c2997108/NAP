@@ -16,6 +16,43 @@ const base=`http://127.0.0.1:${server.address().port}`,channel=process.env.BROWS
 let browser;
 try {
   browser=await chromium.launch({channel,headless:true});
+  const importPage=await browser.newPage({viewport:{width:1440,height:1000}});
+  try {
+    await importPage.goto(base);await importPage.waitForFunction(()=>window.nap?.state.split);
+    const editor=importPage.frames().find(frame=>frame.url()===base+'/split-reads/');
+    const annotated=`>R_A Reverse optional description\n${sequence('nap_demo_A_R')}\n>F_A Forward\n${sequence('nap_demo_A_F')}\n>R_B reverse\n${sequence('nap_demo_B_R')}\n>F_B forward\n${sequence('nap_demo_B_F')}\n`;
+    await editor.locator('#primer-file').setInputFiles({name:'annotated-primers.fasta',mimeType:'text/plain',buffer:Buffer.from(annotated)});
+    assert.equal(await editor.locator('#sample-file').evaluate(input=>input.files.length),0);
+    assert.equal(await editor.locator('#mode-files').getAttribute('aria-selected'),'true');
+    // Hold the File read so the test can inspect the UI before parsing finishes.
+    await editor.evaluate(()=>{
+      const file=document.getElementById('primer-file').files[0],read=file.text.bind(file);
+      file.text=()=>new Promise(resolve=>{window.finishPrimerRead=async()=>resolve(await read());});
+    });
+    await editor.locator('#mode-table').click();
+    await editor.waitForFunction(()=>window.napDefinitions.loading);
+    assert.equal(await editor.locator('#definition-editor').isVisible(),false,'The table stays hidden until the selected FASTA has been imported');
+    assert.equal(await editor.locator('#mode-files').getAttribute('aria-selected'),'true');
+    await editor.evaluate(()=>window.finishPrimerRead());
+    await editor.waitForFunction(()=>!window.napDefinitions.loading && window.napDefinitions.mode==='table');
+    for(const [direction,names] of [['Forward',['F_A','F_B']],['Reverse',['R_A','R_B']]]) {
+      const rows=editor.locator(`#${direction.toLowerCase()}-primers tbody tr`);
+      assert.equal(await rows.count(),2);
+      for(const [index,primerName] of names.entries()) {
+        assert.equal(await rows.nth(index).locator('input[data-field="name"]').inputValue(),primerName);
+        const source=`nap_demo_${index?'B':'A'}_${direction==='Forward'?'F':'R'}`;
+        assert.equal(await rows.nth(index).locator('input[data-field="sequence"]').inputValue(),sequence(source));
+      }
+    }
+    assert.deepEqual(await editor.locator('#sample-matrix thead th').allTextContents(),['Forward ↓ / Reverse →','R_A','R_B']);
+    assert.equal(parseSamples(await editor.locator('#sample-preview').inputValue()).length,4);
+    assert.match(await editor.locator('#definition-status').textContent(),/ファイルを表に読み込みました/);
+    await editor.getByRole('textbox',{name:'Forward 1 配列名',exact:true}).fill('F_A_edited');
+    await editor.locator('#mode-files').click();await editor.locator('#mode-table').click();
+    assert.equal(await editor.getByRole('textbox',{name:'Forward 1 配列名',exact:true}).inputValue(),'F_A_edited','Returning to the same imported FASTA preserves table edits');
+    await importPage.screenshot({path:path.join(output,'primer-prefill.png'),fullPage:true});
+    console.log('PASS annotated FASTA alone fills both primer tables and sample axes before the editor opens, preserving sequences and subsequent edits');
+  } finally {await importPage.close();}
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],httpErrors=[];
   page.setDefaultTimeout(120000);
   page.on('pageerror',error=>errors.push(error.message));

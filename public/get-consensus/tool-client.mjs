@@ -6,19 +6,23 @@ export class ConsensusTools {
     let worker = new Worker(new URL('./tool-worker.mjs', import.meta.url), { type: 'module' });
     this.#jobs.add(worker);
     return new Promise((resolve, reject) => {
-      const done = () => {
+      let settled = false;
+      const done = (terminate = true) => {
         const finished = worker;
         if (!finished) return;
-        worker = null;
+        settled = true; worker = null;
         finished.onmessage = null; finished.onerror = null;
-        finished.terminate(); this.#jobs.delete(finished); signal?.removeEventListener('abort', abort);
+        if (terminate) finished.terminate(); this.#jobs.delete(finished); signal?.removeEventListener('abort', abort);
       };
       const abort = () => { done(); reject(new DOMException('Cancelled', 'AbortError')); };
       signal?.addEventListener('abort', abort, { once: true });
       worker.onerror = event => { done(); reject(new Error(event.message)); };
       worker.onmessage = ({ data }) => {
+        if (settled) return;
         if (data.progress) { onProgress?.(data.progress); return; }
-        done();
+        // A final reply is followed by self.close() in the worker. Avoid racing
+        // that graceful shutdown with a second, forced termination.
+        done(false);
         if (data.error) reject(Object.assign(new Error(data.error), { code: data.code }));
         else resolve(data.result);
       };
@@ -36,3 +40,4 @@ export class ConsensusTools {
     return this.run('mafft', args, { ...settings, stdin: fasta });
   }
 }
+import '../shared/worker-host.mjs';

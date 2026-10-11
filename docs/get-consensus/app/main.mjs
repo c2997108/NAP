@@ -1,6 +1,8 @@
 import { bindCpuParallelism } from '../../shared/parallel-settings.mjs';
 import { defaults,validateOptions } from './pipeline.mjs';
-import { makeZip } from './zip.mjs';
+import { makeZipInWorker } from '../../shared/zip-client.mjs';
+import { resultBytes, retainedResultBytes } from '../../shared/result-memory.mjs';
+import { outputBlobs } from '../../shared/output-blob.mjs';
 import { workbook } from './workbook.mjs';
 import { alignmentViewer,viewerHtml } from './viewer.mjs';
 import { CONSENSUS_RESULT_PAGE,consensusResultPage } from './result-page.mjs';
@@ -42,8 +44,9 @@ function setBusy(value) {
   if(value) {started=Date.now();timer=setInterval(()=>$('#elapsed').textContent=`${Math.floor((Date.now()-started)/1000)} 秒`,1000);}
   else {clearInterval(timer);$('#elapsed').textContent=started?`${((Date.now()-started)/1000).toFixed(1)} 秒`:'';}
 }
+function releaseWorker(terminate = true) {if(worker){worker.onmessage=worker.onerror=null;if(terminate)worker.terminate();worker=null;}}
 function fail(error) {
-  generation++;worker?.terminate();worker=null;setBusy(false);
+  generation++;releaseWorker();setBusy(false);
   status(error.name==='AbortError'?'解析を中止しました。':error.message);$('#status').classList.toggle('error',error.name!=='AbortError');
   if(error.name!=='AbortError') {history.push(`エラー詳細:\n${error.details || error.stack || error.message}`);$('#log').textContent=history.slice(-80).join('\n');}
 }
@@ -54,6 +57,7 @@ function options() {
   return validateOptions(out);
 }
 async function finish(data,token,provenance) {
+  data.files=outputBlobs(data.files);
   const excel=await workbook(data);
   const savedLog=await data.files.get('pipeline.log')?.text() || '';
   if(token!==generation)return;
@@ -86,7 +90,7 @@ async function finish(data,token,provenance) {
     const b=document.createElement('button');b.className='file-button';b.textContent=name;b.onclick=()=>download(name,result.files.get(name));$('#outputs').append(b);
   }
   $('#consensus-progress').value=1;$('#consensus-progress-value').textContent='100% · 完了';$('#consensus-progress').setAttribute('aria-valuetext','100% · 完了');
-  $('#zip').disabled=false;status(`解析完了。${result.files.size} ファイルを保存できます。`);worker?.terminate();worker=null;setBusy(false);
+  $('#zip').disabled=false;status(`解析完了。${result.files.size} ファイルを保存できます。`);setBusy(false);
 }
 function chooseFiles(files,provenance=null) {
   if(busy)throw Error('get-consensusは解析中です。終了または中止してから入力を変更してください。');
@@ -128,24 +132,24 @@ $('#start').onclick=()=>{
         const p=data.progress,active=p.parallel?.activeSamples;
         updateProgress(p);
         status(p.message+(active?.length?` · ${active.length} サンプル実行中（${active.join(', ')}）`:''));
-        history.push(p.message);$('#log').textContent=history.slice(-80).join('\n');$('#log').scrollTop=$('#log').scrollHeight;
+        history.push(p.message);if(history.length>80)history.shift();$('#log').textContent=history.join('\n');$('#log').scrollTop=$('#log').scrollHeight;
       }
       else if(data.error) fail(Object.assign(new Error(data.error.message),{name:data.error.name,details:data.error.details || data.error.stack}));
-      else {$('#consensus-progress-value').textContent='99% · Excelと結果画面を生成';status('Excelと結果画面を生成しています…');finish(data.result,token,provenance).catch(error=>{if(token===generation)fail(error);});}
+      else {releaseWorker(false);$('#consensus-progress-value').textContent='99% · Excelと結果画面を生成';status('Excelと結果画面を生成しています…');finish(data.result,token,provenance).catch(error=>{if(token===generation)fail(error);});}
     };
-    worker.postMessage({files:selected,options:settings});
+    worker.postMessage({files:selected,options:settings,memoryContext:{retainedBytes:retainedResultBytes('get-consensus')}});
   } catch(e) {fail(e);}
 };
 $('#cancel').onclick=()=>{worker?.postMessage({cancel:true});fail(new DOMException('Cancelled','AbortError'));};
 $('#zip').onclick=async()=>{
   const button=$('#zip');button.disabled=true;button.textContent='ZIP を作成中…';
-  try {download('get-consensus-results.zip',await makeZip([...result.files].map(([name,blob])=>({name,blob}))));}
+  try {download('get-consensus-results.zip',await makeZipInWorker([...result.files].map(([name,blob])=>({name,blob}))));}
   catch(e) {status(e.message);}finally {button.disabled=false;button.textContent='すべて ZIP で保存';}
 };
 if(!crossOriginIsolated) {status('解析環境の準備が完了していません。HTTPS または npm start でNAPを開き、ページを再読み込みしてください。');$('#status').classList.add('error');}
 filesChanged();window.getConsensus={get result(){return result;},get busy(){return busy;},
   get inputs(){return selected.slice();},
-  get state(){return {busy,revision:generation,files:selected.map(file=>({name:file.name,size:file.size})),provenance:inputProvenance,table:result?.files.has('all.cnt.seq.qual.txt')?{name:'all.cnt.seq.qual.txt',size:result.files.get('all.cnt.seq.qual.txt').size,representatives:result.rows.length,samples:result.names.length}:null};},
+  get state(){return {busy,revision:generation,resultBytes:resultBytes(result?.files),files:selected.map(file=>({name:file.name,size:file.size})),provenance:inputProvenance,table:result?.files.has('all.cnt.seq.qual.txt')?{name:'all.cnt.seq.qual.txt',size:result.files.get('all.cnt.seq.qual.txt').size,representatives:result.rows.length,samples:result.names.length}:null};},
   exportTable(revision=generation){
     if(busy || !result || revision!==generation)throw Error('get-consensusの結果が更新されたか、解析中です。完了した結果を選び直してください。');
     return {file:new File([result.files.get('all.cnt.seq.qual.txt')],'all.cnt.seq.qual.txt',{type:'text/plain'}),provenance:{application:'NAP',stage:'get-consensus',manifest:structuredClone(result.manifest)}};

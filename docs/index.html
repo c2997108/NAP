@@ -6,13 +6,29 @@
   <link rel="icon" href="data:,"><link rel="stylesheet" href="./nap.css">
 </head>
 <body>
-  <header class="app-header"><div class="brand"><span class="brand-mark">NAP</span><div><div class="brand-title"><h1>Nanopore Amplicon Pipeline</h1><!-- app-version:start --><span id="app-version" class="app-version" data-version="1.0.0" data-build="759c5dd3ee0e" data-updated-at="2026-10-11T00:55:31.151Z" title="表示中のNAPのバージョン・配布ファイルのビルドID・最終更新日時（日本標準時）">v1.0.0<span class="build-id">ビルド 759c5dd3ee0e</span><time class="updated-at" datetime="2026-10-11T00:55:31.151Z">最終更新 2026-10-11 09:55:31 JST</time></span><!-- app-version:end --></div><p>FASTQの分割から、コンセンサス配列・分類まで。</p></div></div><span class="local-badge">● ブラウザ内で解析</span></header>
+  <header class="app-header"><div class="brand"><span class="brand-mark">NAP</span><div><div class="brand-title"><h1>Nanopore Amplicon Pipeline</h1><!-- app-version:start --><span id="app-version" class="app-version" data-version="1.0.0" data-build="41932bc3b815" data-updated-at="2026-10-11T12:17:57.842Z" title="表示中のNAPのバージョン・配布ファイルのビルドID・最終更新日時（日本標準時）">v1.0.0<span class="build-id">ビルド 41932bc3b815</span><time class="updated-at" datetime="2026-10-11T12:17:57.842Z">最終更新 2026-10-11 21:17:57 JST</time></span><!-- app-version:end --></div><p>FASTQの分割から、コンセンサス配列・分類まで。</p></div></div><span class="local-badge">● ブラウザ内で解析</span></header>
   <main>
     <div class="workspace-bar"><div class="tabs" role="tablist" aria-label="解析ステップ">
       <button id="tab-split-reads" role="tab" aria-selected="true" aria-controls="panel-split-reads"><span>01</span> split-reads</button>
       <button id="tab-get-consensus" role="tab" aria-selected="false" aria-controls="panel-get-consensus" tabindex="-1"><span>02</span> get-consensus <small id="output-count" hidden></small></button>
       <button id="tab-annotation" role="tab" aria-selected="false" aria-controls="panel-annotation" tabindex="-1"><span>03</span> rRNA annotation</button>
     </div><p id="workspace-status" role="status" aria-live="polite">入力待ち</p></div>
+    <template id="memory-panel-template"><details id="memory-panel" class="memory-panel" aria-labelledby="memory-title">
+      <summary id="memory-title">メモリーの状況</summary>
+      <div class="memory-heading"><div><button id="memory-refresh" type="button">簡易情報を更新</button><button id="memory-measure" type="button" disabled>NAPの使用量を測定</button></div></div>
+      <dl class="memory-grid">
+        <div><dt id="memory-app-label">JavaScriptヒープ使用量（参考）</dt><dd id="memory-app-used">確認中…</dd><small id="memory-app-detail"></small></div>
+        <div><dt>JSヒープ上限までの差（参考）</dt><dd id="memory-headroom">確認中…</dd><small>空きRAMや、追加で確保できる量ではありません。上限は下の内訳で確認できます。</small></div>
+        <div><dt>端末の総RAM（ブラウザー概算）</dt><dd id="memory-device">確認中…</dd><small>ブラウザーが丸めて報告する概算です。PCの空きRAMは取得できません。</small></div>
+        <div><dt>NAPの自動メモリー予算（目安）</dt><dd id="memory-auto-budget">確認中…</dd><small id="memory-budget-detail"></small></div>
+      </dl>
+      <details class="memory-details"><summary>JavaScriptの上限・保持ファイルの内訳</summary><dl class="memory-grid">
+        <div><dt>JavaScriptヒープの上限（参考）</dt><dd id="memory-heap-limit">確認中…</dd><small id="memory-heap-detail"></small></div>
+        <div><dt>保持している結果ファイルの合計サイズ</dt><dd id="memory-results">0 MiB</dd><small id="memory-results-detail"></small><small>ファイルサイズの合計です。実際のRAM使用量とは異なります。</small></div>
+      </dl></details>
+      <p class="memory-note">PCの空きRAM・ブラウザー全体の使用量・NAPが追加で確保できる正確な量は、ブラウザーから取得できません。</p>
+      <p id="memory-updated" class="memory-note"></p>
+    </details></template>
     <section id="panel-split-reads" role="tabpanel" aria-labelledby="tab-split-reads">
       <div class="stage-heading"><div><h2>サンプルごとにFASTQを分割</h2><p>FASTQ、primer.fa、sample.txtを指定します。分割結果は次のタブへ渡せます。</p></div></div>
       <iframe id="split-frame" data-src="./split-reads/" title="split-reads" allow="cross-origin-isolated"></iframe>
@@ -22,8 +38,23 @@
       <section class="handoff-card" aria-labelledby="handoff-title">
         <div class="handoff-head"><h3 id="handoff-title">split-readsの分割結果</h3><span id="selection-count">0 ファイル選択</span></div>
         <p id="handoff-empty">split-readsで分割すると、ここにサンプル別FASTQが表示されます。</p>
-        <div id="handoff-files" hidden><div class="selection-tools"><label>サンプルを絞り込む<input id="sample-filter" type="search" placeholder="サンプル名" autocomplete="off"></label><div><button id="select-all">すべて選択</button><button id="select-none">選択を解除</button></div></div>
-          <div class="sample-list"><table><thead><tr><th>選択</th><th>サンプル / FASTQ</th><th>リード数</th><th>サイズ</th></tr></thead><tbody id="split-output-list"></tbody></table></div>
+        <div id="handoff-files" hidden>
+          <div class="selection-tools">
+            <label>サンプルを絞り込む<input id="sample-filter" type="search" placeholder="サンプル名" autocomplete="off"></label>
+            <label>最低リード数<input id="min-reads-filter" type="number" min="0" step="1" placeholder="制限なし" aria-describedby="selection-summary"></label>
+            <label>平均リード長の下限 (bp)<input id="min-length-filter" type="number" min="0" step="any" placeholder="制限なし" aria-describedby="selection-summary"></label>
+            <label>平均リード長の上限 (bp)<input id="max-length-filter" type="number" min="0" step="any" placeholder="制限なし" aria-describedby="selection-summary"></label>
+            <label>並び替え<select id="sample-sort">
+              <option value="sample-asc">サンプル名：昇順</option><option value="sample-desc">サンプル名：降順</option>
+              <option value="reads-desc">リード数：多い順</option><option value="reads-asc">リード数：少ない順</option>
+              <option value="meanLength-desc">平均リード長：長い順</option><option value="meanLength-asc">平均リード長：短い順</option>
+              <option value="size-desc">ファイルサイズ：大きい順</option><option value="size-asc">ファイルサイズ：小さい順</option>
+            </select></label>
+          </div>
+          <div class="selection-actions"><button id="select-all">表示中をすべて選択</button><button id="select-none">選択を解除</button><button id="reset-filters">絞り込み・並び替えをリセット</button></div>
+          <p id="selection-summary" class="selection-note" role="status" aria-live="polite"></p>
+          <p id="selection-empty" class="selection-note" hidden>条件に合うFASTQはありません。絞り込み条件を変更してください。</p>
+          <div class="sample-list"><table><thead><tr><th scope="col">選択</th><th scope="col">サンプル / FASTQ</th><th scope="col">リード数</th><th scope="col">平均リード長 (bp)</th><th scope="col">サイズ</th></tr></thead><tbody id="split-output-list"></tbody></table></div>
         </div>
         <div class="transfer-actions"><button id="transfer-selected" class="primary" disabled>選択したFASTQをget-consensusに渡す</button><p id="transfer-status" role="status" aria-live="polite">ダウンロード・再アップロードは不要です。受け渡し後に解析条件を確認して開始してください。</p></div>
       </section>

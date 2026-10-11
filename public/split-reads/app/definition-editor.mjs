@@ -107,12 +107,13 @@ export function createDefinitionEditor({ getFiles, saveBlob, onAvailabilityChang
   async function selectMode(value, focus = false, scroll = false) {
     if (busy || loading) return;
     const { primerFile, sampleFile } = getFiles();
-    setMode(value, focus);
+    let imported;
     if (value === 'table' && primerFile && (primerFile !== importedFiles?.primerFile || sampleFile !== importedFiles?.sampleFile)) {
-      await importFiles();
-      if (mode !== value) return;
-      if (focus) $(`mode-${value}`).focus();
+      imported = await importFiles();
+      if (!imported) return;
     }
+    setMode(value, focus);
+    if (imported) message(imported.message || imported.error, !imported.success);
     if (value === 'table' && scroll) scrollToTable();
   }
   for (const value of ['files', 'table']) {
@@ -308,8 +309,9 @@ export function createDefinitionEditor({ getFiles, saveBlob, onAvailabilityChang
       $('show-cell-lengths').checked = individual; $('sample-matrix').classList.toggle('show-cell-lengths', individual);
       if (openTable) { setMode('table'); scrollToTable(); }
       const fallback = forwardDefaults.length ? ` 方向を判定できない${forwardDefaults.length}配列をForwardに配置しました: ${forwardDefaults.slice(0, 8).join('、')}${forwardDefaults.length > 8 ? '…' : ''}。` : '';
-      message(`ファイルを表に読み込みました。名前・配列・サンプル名を編集できます。${fallback}`);
-      return { success: true };
+      const text = `ファイルを表に読み込みました。名前・配列・サンプル名を編集できます。${fallback}`;
+      message(text);
+      return { success: true, message: text };
     } catch (error) {
       if (token === importToken) { message(error.message, true); return { success: false, error: error.message }; }
     }

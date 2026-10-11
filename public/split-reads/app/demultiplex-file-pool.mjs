@@ -21,7 +21,8 @@ export async function runFilePool({ files, concurrency, createSlot, prepareJob =
       totalReads: states.reduce((sum, file) => sum + file.totalReads, 0), assignedReads: states.reduce((sum, file) => sum + file.assignedReads, 0),
       segments: states.reduce((sum, file) => sum + file.segments, 0), batches: states.reduce((sum, file) => sum + file.batches, 0), files: progressFiles });
   };
-  const close = slot => { if (slots.delete(slot)) slot.dispose(); };
+  const closing = [];
+  const close = slot => { if (slots.delete(slot)) closing.push(slot.dispose()); };
   try {
     const results = await mapParallel(files, limit, async (file, index, signal) => {
       const state = states[index];
@@ -62,5 +63,5 @@ export async function runFilePool({ files, concurrency, createSlot, prepareJob =
       }
     });
     return { results, execution: { concurrency: budget.limit, initialLimit: limit, maxActiveFiles, memoryRetries: budget.memoryRetries, files: snapshot() } };
-  } finally { for (const slot of slots) close(slot); }
+  } finally { for (const slot of slots) close(slot); await Promise.all(closing); }
 }

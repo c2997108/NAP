@@ -11,17 +11,9 @@ const full=process.argv.includes('--full-db'),channel=process.env.BROWSER_CHANNE
 const demo=JSON.parse(await readFile(path.join(root,'public/examples/expected.json'),'utf8'));
 const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}`;
 let injectedClient;
-// Chrome can retain terminated worker debugger targets. Audit native workers'
-// actual ownership/terminate calls instead of treating debugger metadata as RAM.
-const auditedWorker = `const NativeWorker=globalThis.Worker,children=new Set();
-self.addEventListener('message',({data})=>{if(data.__annotationAudit)globalThis.__annotationAudit=new Int32Array(data.__annotationAudit);});
-globalThis.Worker=class extends NativeWorker {
-  constructor(...args){super(...args);children.add(this);Atomics.add(globalThis.__annotationAudit,0,1);}
-  terminate(){if(children.delete(this))Atomics.add(globalThis.__annotationAudit,1,1);return super.terminate();}
-};\n` + await readFile(path.join(root,'public/annotation/app/pipeline-worker.mjs'),'utf8');
 const serve=server.listeners('request')[0];server.removeListener('request',serve);
 server.on('request',(req,res)=>{
-  const body=req.url==='/annotation/app/pipeline-worker.mjs'?auditedWorker:injectedClient&&req.url==='/get-consensus/tool-client.mjs'?injectedClient:null;
+  const body=injectedClient&&req.url==='/get-consensus/tool-client.mjs'?injectedClient:null;
   if(body) {
     res.writeHead(200,{'Content-Type':'text/javascript','Cache-Control':'no-cache','Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'require-corp','Cross-Origin-Resource-Policy':'same-origin'});res.end(body);
   } else serve(req,res);
@@ -30,15 +22,6 @@ let browser;
 try {
   browser=await chromium.launch({channel,headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
-  await page.addInitScript(()=>{
-    const NativeWorker=window.Worker,active=new Set();window.annotationTestWorkers=active;
-    window.__annotationAudit=new Int32Array(new SharedArrayBuffer(8));
-    window.Worker=class extends NativeWorker {
-      constructor(...args){super(...args);active.add(this);}
-      postMessage(data,...args){return super.postMessage({...data,__annotationAudit:window.__annotationAudit.buffer},...args);}
-      terminate(){active.delete(this);return super.terminate();}
-    };
-  });
   page.setDefaultTimeout(600000);page.on('pageerror',error=>errors.push(error.message));
   await page.goto(base);await page.waitForFunction(()=>window.nap?.state.annotation && window.nap.state.consensus);
   const consensus=page.frame({name:'consensus-frame'}),annotation=page.frame({name:'annotation-frame'});
@@ -139,10 +122,17 @@ try {
   const overwrite=await annotation.evaluate(()=>{try {window.napAnnotation.setTable(new File([''],'empty.txt'));return false;}catch(error){return /解析中/.test(error.message);}});assert.equal(overwrite,true);
   await annotation.locator('#cancel').click();await annotation.waitForFunction(()=>!window.napAnnotation.state.busy);
   assert.match(await annotation.locator('#status').textContent(),/中止/);
-  assert.equal(await annotation.evaluate(()=>window.annotationTestWorkers.size),0,'Coordinator worker receives terminate after cancellation');
-  const [created,terminated]=await annotation.evaluate(()=>[...window.__annotationAudit]);
-  assert.ok(created>0,'Audit includes real native tool workers');
-  assert.equal(terminated,created,'Completion/retry/cancellation terminate all native tool workers');
+  const cdp=await browser.newBrowserCDPSession();let activeWorkers;
+  // Check real browser targets rather than counting terminate() calls. Workers
+  // close themselves after successful jobs; cancellation also disposes children.
+  const deadline=Date.now()+10000;
+  do {
+    const targets=await cdp.send('Target.getTargets');
+    activeWorkers=targets.targetInfos.filter(target=>target.type==='worker');
+    if(!activeWorkers.length)break;
+    await new Promise(resolve=>setTimeout(resolve,100));
+  } while(Date.now()<deadline);
+  assert.deepEqual(activeWorkers,[],'Cancellation terminates analysis and native tool workers');await cdp.detach();
   console.log('PASS annotation ZIP/Excel/offline HTML, valid archive links, mobile layout, active input guard and cancel worker cleanup');
   const folder=path.join(out,'reference-folder');await mkdir(folder,{recursive:true});
   const generated=await annotation.evaluate(async text=>{

@@ -1,10 +1,20 @@
+import { selectFastqFiles } from './shared/fastq-selection.mjs';
+import { startMemoryMonitor } from './shared/memory-monitor.mjs';
+
 const $=id=>document.getElementById(id);
 const appVersion=$('app-version').dataset.version;
 const stages=['split-reads','get-consensus','annotation'];
 const splitFrame=$('split-frame'),consensusFrame=$('consensus-frame'),annotationFrame=$('annotation-frame');
 const frames={'split-reads':splitFrame,'get-consensus':consensusFrame,annotation:annotationFrame};
 const stageActions={};
+const stageApis={'split-reads':'napSplit','get-consensus':'napConsensus',annotation:'napAnnotation'};
+const retainedResults=stages.map(name=>({name,bytes:0}));
 let active='split-reads',signature='',selected=new Set(),transferToken=0,transferring=false;
+let outputFiles=[],visibleFiles=[];
+const memoryMonitor=startMemoryMonitor({getResults:()=>retainedResults});
+const outputRows=new Map();
+const filterInputs=['sample-filter','min-reads-filter','min-length-filter','max-length-filter'].map($);
+const selectedFiles=()=>visibleFiles.filter(file=>selected.has(file.name));
 const split=()=>splitFrame.contentWindow.napSplit;
 const consensus=()=>consensusFrame.contentWindow.napConsensus;
 const annotation=()=>annotationFrame.contentWindow.napAnnotation;
@@ -37,26 +47,48 @@ for(const stage of stages) {
 window.addEventListener('hashchange',()=>activate(location.hash.slice(1)));
 function updateControls() {
   const splitState=split()?.state,consensusState=consensus()?.state,annotationState=annotation()?.state;
+  [splitState,consensusState,annotationState].forEach((state,index)=>{retainedResults[index].bytes=state?.resultBytes || 0;});
   const count=splitState?.files.length||0;
-  $('selection-count').textContent=`${selected.size} / ${count} ファイル選択`;
-  $('transfer-selected').disabled=transferring || !selected.size || !splitState || splitState.busy || !consensusState || consensusState.busy;
+  const chosen=selectedFiles().length;
+  $('selection-count').textContent=`${chosen} ファイルを受け渡し`;
+  $('transfer-selected').disabled=transferring || !chosen || !splitState || splitState.busy || !consensusState || consensusState.busy;
   if(stageActions['open-consensus'])stageActions['open-consensus'].disabled=!count;
   if(stageActions['open-annotation'])stageActions['open-annotation'].disabled=!consensusState?.table || consensusState.busy;
   $('transfer-consensus').disabled=!consensusState?.table || consensusState.busy || !annotationState || annotationState.busy;
   $('consensus-output-summary').textContent=consensusState?.table?`${consensusState.table.name} · ${consensusState.table.representatives} 代表配列 · ${consensusState.table.samples} サンプル`:'get-consensusを実行すると、ここから集計表を渡せます。';
-  for(const control of $('handoff-files').querySelectorAll('input,button'))control.disabled=transferring;
+  for(const control of $('handoff-files').querySelectorAll('input,button,select'))control.disabled=transferring;
+  $('select-all').disabled=transferring || !visibleFiles.length;
+  $('select-none').disabled=transferring || !selected.size;
   const jobs=[splitState?.busy?'split-reads処理中':'',consensusState?.busy?'get-consensus解析中':'',annotationState?.busy?'分類解析中':''].filter(Boolean);
   $('workspace-status').textContent=jobs.length?jobs.join(' · '):count?`${count} サンプルの分割結果`:'入力待ち';
+  memoryMonitor.refresh();
+}
+function refreshSelection() {
+  let error='';
+  try {
+    const invalid=filterInputs.find(input=>!input.validity.valid);
+    if(invalid)throw Error(invalid.id==='min-reads-filter'?'最低リード数には0以上の整数を入力してください。':'平均リード長には0以上の数値を入力してください。');
+    const number=id=>$(id).value===''?null:$(id).valueAsNumber;
+    visibleFiles=selectFastqFiles(outputFiles,{sample:$('sample-filter').value,minReads:number('min-reads-filter')??0,
+      minMeanLength:number('min-length-filter'),maxMeanLength:number('max-length-filter'),sort:$('sample-sort').value});
+  } catch(reason) {error=reason.message;visibleFiles=[];}
+  for(const row of outputRows.values())row.hidden=true;
+  for(const file of visibleFiles) {const row=outputRows.get(file.name);row.hidden=false;$('split-output-list').append(row);}
+  $('selection-summary').classList.toggle('error',!!error);
+  $('selection-summary').textContent=error || `${visibleFiles.length} / ${outputFiles.length} 件を表示。表示中のチェック済みFASTQだけを、この順序で渡します。平均長はプライマー除去後のリード長です。`;
+  $('selection-empty').hidden=!!error || !!visibleFiles.length;
+  updateControls();
 }
 function refreshOutputs() {
   const state=split()?.state;if(!state)return;
   const next=JSON.stringify([state.revision,state.files]);
   if(next!==signature) {
     signature=next;transferToken++;transferring=false;
+    outputFiles=state.files;outputRows.clear();
     selected=new Set(state.files.map(file=>file.name));
     const table=$('split-output-list');table.replaceChildren();
     for(const file of state.files) {
-      const row=document.createElement('tr');row.dataset.sample=file.sample.toLowerCase();
+      const row=document.createElement('tr');row.dataset.sample=file.sample.toLowerCase();row.dataset.outputName=file.name;
       const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=true;
       checkbox.setAttribute('aria-label',`${file.sample}.fq`);checkbox.dataset.outputName=file.name;
       checkbox.onchange=()=>{if(checkbox.checked)selected.add(file.name);else selected.delete(file.name);updateControls();};
@@ -64,27 +96,33 @@ function refreshOutputs() {
       const label=document.createElement('td'),sample=document.createElement('span'),filename=document.createElement('small');
       sample.textContent=file.sample;filename.textContent=file.name.split('/').at(-1);label.append(sample,filename);
       const reads=document.createElement('td');reads.textContent=file.reads.toLocaleString();
-      const bytes=document.createElement('td');bytes.textContent=size(file.size);row.append(choice,label,reads,bytes);table.append(row);
+      const mean=document.createElement('td');mean.textContent=Number.isFinite(file.meanLength)?file.meanLength.toLocaleString('ja-JP',{maximumFractionDigits:2}):'—';
+      const bytes=document.createElement('td');bytes.textContent=size(file.size);row.append(choice,label,reads,mean,bytes);table.append(row);outputRows.set(file.name,row);
     }
     $('handoff-empty').hidden=!!state.files.length;$('handoff-files').hidden=!state.files.length;
     $('output-count').hidden=!state.files.length;$('output-count').textContent=String(state.files.length);
-    $('sample-filter').value='';
     $('transfer-status').classList.remove('error');
     $('transfer-status').textContent=state.files.length?'必要なFASTQを選び、get-consensusに渡してください。解析は自動では開始しません。':'分割結果を待っています。保存済みFASTQを下の入力欄から読み込むこともできます。';
+    refreshSelection();
   }
   updateControls();
 }
-$('sample-filter').oninput=()=>{const term=$('sample-filter').value.toLowerCase();for(const row of $('split-output-list').children)row.hidden=!row.dataset.sample.includes(term);};
-for(const [id,checked] of [['select-all',true],['select-none',false]])$(id).onclick=()=>{
-  selected.clear();for(const checkbox of $('split-output-list').querySelectorAll('input')) {checkbox.checked=checked;if(checked)selected.add(checkbox.dataset.outputName);}updateControls();
+for(const input of filterInputs)input.oninput=refreshSelection;
+$('sample-sort').onchange=refreshSelection;
+$('reset-filters').onclick=()=>{for(const input of filterInputs)input.value='';$('sample-sort').value='sample-asc';refreshSelection();};
+$('select-all').onclick=()=>{
+  for(const file of visibleFiles) {selected.add(file.name);outputRows.get(file.name).querySelector('input').checked=true;}updateControls();
+};
+$('select-none').onclick=()=>{
+  selected.clear();for(const row of outputRows.values())row.querySelector('input').checked=false;updateControls();
 };
 const openConsensus=()=>{activate('get-consensus');window.scrollTo({top:0,behavior:'smooth'});};
 $('transfer-selected').onclick=async()=>{
-  const state=split()?.state;if(!state || consensus()?.state.busy || transferring || !selected.size)return;
+  const state=split()?.state;if(!state || consensus()?.state.busy || transferring || !selectedFiles().length)return;
   const token=++transferToken;transferring=true;updateControls();
   $('transfer-status').classList.remove('error');$('transfer-status').textContent='選択したFASTQを受け渡しています…';
   try {
-    const names=state.files.filter(file=>selected.has(file.name)).map(file=>file.name);
+    const names=selectedFiles().map(file=>file.name);
     const exported=await split().exportFastq(names,state.revision);
     if(token!==transferToken)return;
     consensus().setFiles(exported.files,{application:'NAP',version:appVersion,...exported.provenance});
@@ -115,6 +153,9 @@ for(const [frame,event,refresh,actionId,onNext] of [[splitFrame,'nap:split-state
       const button=frame.contentDocument.getElementById(actionId);
       stageActions[actionId]=button;button.hidden=false;button.onclick=onNext;
     }
+    const doc=frame.contentDocument,panel=doc.importNode($('memory-panel-template').content.firstElementChild,true);
+    doc.querySelector(frame===splitFrame?'.split-run-actions':'.run-panel').before(panel);
+    memoryMonitor.addPanel(panel);
     frame.contentWindow.addEventListener(event,refresh);
     new ResizeObserver(()=>resize(frame)).observe(frame.contentDocument.body);
     refresh();resize(frame);
@@ -122,4 +163,8 @@ for(const [frame,event,refresh,actionId,onNext] of [[splitFrame,'nap:split-state
   frame.addEventListener('load',connect);connect();
 }
 activate(location.hash.slice(1));
-window.nap={activateTab:activate,get state(){return {activeTab:active,selected:[...selected],split:split()?.state,consensus:consensus()?.state,annotation:annotation()?.state};}};
+window.nap={activateTab:activate,
+  retainedResultBytes(excludeStage) {
+    return stages.reduce((total,stage)=>total+(stage===excludeStage?0:frames[stage].contentWindow[stageApis[stage]]?.state.resultBytes || 0),0);
+  },
+  get state(){return {activeTab:active,selected:selectedFiles().map(file=>file.name),split:split()?.state,consensus:consensus()?.state,annotation:annotation()?.state};}};

@@ -4,7 +4,7 @@ import { fileParallelPlan } from '../../shared/parallel-settings.mjs';
 
 // Only job metadata is queued up front. FASTQ records are streamed into at
 // most one batch per active slot, and discarded after that batch succeeds.
-export async function runSingleFileBatches({ file, options, referenceBytes = 0, createSlot, onProgress = () => {}, onPlan = () => {}, onMemoryPressure = () => {}, environment = globalThis.navigator || {}, retryDelay = 250 }) {
+export async function runSingleFileBatches({ file, options, referenceBytes = 0, retainedBytes = 0, createSlot, onProgress = () => {}, onPlan = () => {}, onMemoryPressure = () => {}, environment = globalThis.navigator || {}, retryDelay = 250 }) {
   let inputReads = 0, maxReadLength = 0, scanConsumed = 0, consumed = 0, lastCount = 0;
   const started = performance.now();
   const input = { index: 0, name: file.name, size: file.size, state: 'running', phase: 'counting', stage: '総リード数を確認', inputReads: null, countedReads: 0, scanConsumed: 0, consumed: 0, totalReads: 0, assignedReads: 0, segments: 0, batches: 0, fraction: 0 };
@@ -19,7 +19,7 @@ export async function runSingleFileBatches({ file, options, referenceBytes = 0, 
   }
   if (!inputReads) throw new Error('FASTQ にリードがありません。');
   const batchCount = Math.ceil(inputReads / options.batchSize);
-  const plan = fileParallelPlan({ parallelMode: options.parallelMode, parallelCount: options.concurrency }, [file], { referenceBytes, jobs: batchCount, workingBytes: maxReadLength * Math.min(options.batchSize, inputReads) * 24 }, environment);
+  const plan = fileParallelPlan({ parallelMode: options.parallelMode, parallelCount: options.concurrency }, [file], { referenceBytes, retainedBytes, jobs: batchCount, workingBytes: maxReadLength * Math.min(options.batchSize, inputReads) * 24 }, environment);
   onPlan(plan);
   const jobs = Array.from({ length: batchCount }, (_, index) => ({ index, name: `${file.name} · バッチ ${index + 1}`, size: Math.min(options.batchSize, inputReads - index * options.batchSize) }));
   const reader = readFastq(file, bytes => { consumed += bytes; })[Symbol.asyncIterator]();
@@ -63,7 +63,7 @@ export async function runSingleFileBatches({ file, options, referenceBytes = 0, 
     const pool = await runFilePool({ files: jobs, concurrency: plan.limit, prepareJob: (job, index, signal) => readBatch(job, signal), includeFiles: false, retryDelay, onProgress: report, onMemoryPressure,
       createSlot: index => {
         const slot = createSlot(index); let disposed = false;
-        return { initialize: () => slot.initialize(), dispose: () => { disposed = true; slot.dispose(); },
+        return { initialize: () => slot.initialize(), dispose: () => { disposed = true; return slot.dispose(); },
           run: async (job, notify) => {
             if (disposed) throw new Error('バッチ処理を中止しました。');
             const batch = await readBatch(job);

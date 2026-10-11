@@ -116,8 +116,8 @@
       "sha256": "6a80f5b19ac8ffd0480271d0fac09e78eca5ecbb5844678a5470bf30834b6ca3"
     },
     "vsearch.mjs": {
-      "bytes": 87121,
-      "sha256": "21a9932562911d69e59aa79c528a6f8df103a6dac413fe1e6790cf7c135469dd"
+      "bytes": 86974,
+      "sha256": "e3dd53d78b36f5694e5435e4e9f9b0dbf2817efde0d676d7f27b962cc6c92378"
     },
     "vsearch.wasm": {
       "bytes": 520069,
@@ -149,6 +149,13 @@
     "../../shared/wasm/makeblastdb.wasm": {
       "bytes": 9013913,
       "sha256": "a12aa7b8157242b8440acd5669ac967a639984b7e14e037b5958532a7ddcb5fb"
+    }
+  },
+  "runtimePatches": {
+    "vsearch.mjs": {
+      "script": "scripts/patch-vsearch-runtime.mjs",
+      "upstream": "https://github.com/emscripten-core/emscripten/issues/20920",
+      "reason": "Use the existing postMessage mailbox fallback instead of infinite Atomics.waitAsync listeners."
     }
   }
 }

@@ -7,6 +7,7 @@ import { mapParallel } from './parallel.mjs';
 import { ConsensusProgress } from './progress.mjs';
 import { ConsensusSamples } from './sample-client.mjs';
 import { fileParallelPlan } from '../../shared/parallel-settings.mjs';
+import { resultBytes } from '../../shared/result-memory.mjs';
 import { toolScope } from './tool-scope.mjs';
 import { isMemoryAllocationError } from './memory.mjs';
 export const defaults={firstIdentity:.97,minReads:3,maxReads:30,secondIdentity:.99,allIdentity:1,blastIdentity:.9,minBitscore:200,minDepth:30,batchSize:300,parallelMode:'auto',parallelSamples:8,strand:'plus',adjustDirection:false,haplotypes:true};
@@ -174,11 +175,11 @@ export class ConsensusPipeline {
     save('work-blast/'+name+'.cnt','id\t'+name+'\n'+[...counts].sort((a,b)=>b[1]-a[1] || compare(a[0],b[0])).map(([id,n])=>id+'\t'+n+'\n').join(''));
     return {local:{files:local.files,logs:local.logs,warnings:local.warnings},sample,counts};
   }
-  async run(inputFiles,options={},signal) {
+  async run(inputFiles,options={},signal,{retainedBytes=0}={}) {
     const o=validateOptions(options),samples=[],entries=[];
     const started=new Date().toISOString(); let commands=0, ties=0;
     let parallel, tracker;
-    const plan=fileParallelPlan({parallelMode:o.parallelMode,parallelCount:o.parallelSamples},inputFiles||[],{readsInMemory:true},this.environment);
+    const plan=fileParallelPlan({parallelMode:o.parallelMode,parallelCount:o.parallelSamples},inputFiles||[],{readsInMemory:true,retainedBytes},this.environment);
     const concurrency={...plan,samplePeak:0,blastPeak:0};
     // Each sample owns its outputs and logs; merge in input order after the
     // barrier so worker completion order never changes consensus selection.
@@ -207,7 +208,21 @@ export class ConsensusPipeline {
     }});
     emit(`CPU ${plan.cores} 論理コア / ${o.parallelMode==='auto'?'自動':'手動'}の指定 ${plan.requested} / 推定メモリー予算 ${plan.memoryBudgetMB} MiB`);
     emit(`${jobs.length} FASTQ を最大 ${concurrency.limit} サンプルずつ並列実行`);
-    const processed=await mapParallel(jobs,plan.limit,(job,index,signal)=>this.sampleJobs.run('analysis',{job,options:o},{signal,onProgress:p=>sampleProgress(job.name,p)}),poolOptions('サンプル解析',jobs,'samplePeak'));
+    let bufferedOutputs=0;
+    const reserveOutputs=(bytes,settings={readsInMemory:true})=>{
+      const next=fileParallelPlan({parallelMode:o.parallelMode,parallelCount:o.parallelSamples},inputFiles,{...settings,retainedBytes:retainedBytes+bytes},this.environment);
+      if(next.limit<budget.limit) {
+        const message=`保存済み結果のメモリーを考慮して、同時処理上限 ${budget.limit} → ${next.limit} に調整しました。`;
+        budget.limit=next.limit;warnings.push(message);emit(message);
+      }
+      return next;
+    };
+    const processed=await mapParallel(jobs,plan.limit,async(job,index,signal)=>{
+      const result=await this.sampleJobs.run('analysis',{job,options:o},{signal,onProgress:p=>sampleProgress(job.name,p)});
+      bufferedOutputs+=resultBytes(result.local.files);reserveOutputs(bufferedOutputs);
+      return result;
+    },poolOptions('サンプル解析',jobs,'samplePeak'));
+    concurrency.analysisOutputMB=Math.ceil(bufferedOutputs/1024/1024);
     parallel=undefined;
     for(const result of processed) {merge(result.local);samples.push(result.sample);entries.push(...result.entries);ties+=result.ties;}
     if(!entries.length) throw new Error('コンセンサスが生成されませんでした。クラスターの最小リード数・同一率を確認してください。');
@@ -236,6 +251,7 @@ export class ConsensusPipeline {
     if(!Object.keys(dbFiles).length) throw new Error('BLAST データベースが生成されませんでした。');
     tracker.setGlobal('BLAST集計',1);emit('BLASTデータベース生成完了');
     const sampleCounts=new Map(),totals=new Map();
+    concurrency.blastMemory=reserveOutputs(resultBytes(files),{readsInMemory:false,referenceBytes:Object.values(dbFiles).reduce((total,bytes)=>total+bytes.byteLength,0)});
     const blastJobs=samples.map((sample,index)=>({...jobs[index],sample,dbFiles}));
     const searched=await mapParallel(blastJobs,plan.limit,(job,index,signal)=>this.sampleJobs.run('blast',{job,options:o},{signal,onProgress:p=>sampleProgress(job.name,p)}),poolOptions('BLAST 集計',blastJobs,'blastPeak'));
     parallel=undefined;

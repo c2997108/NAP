@@ -45,3 +45,4 @@ export class BlastClient {
     this.pending.clear();
   }
 }
+import '../../shared/worker-host.mjs';
