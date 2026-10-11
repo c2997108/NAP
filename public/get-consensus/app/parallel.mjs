@@ -39,7 +39,10 @@ export async function mapParallel(items, limit, task, { signal, onState = () => 
               if (previous === launchedLimit) budget.limit = Math.max(1, Math.floor(previous / 2));
               budget.memoryRetries++; retries.set(index, attempt); pending.unshift(index);
               if (launchedLimit === 1) serialRetries.add(index);
-              readyAt = Date.now() + retryDelay;
+              // Shared WASM reservations may be reclaimed after terminate()
+              // returns. Give a serial retry more time without delaying jobs
+              // that have not encountered memory pressure.
+              readyAt = Date.now() + retryDelay * (launchedLimit === 1 ? 8 : Math.min(8, 2 ** (attempt - 1)));
               onMemoryPressure({ index, previous, limit: capacity(), attempt, error }); report();
             } else fail(isMemoryAllocationError(error) ? memoryError(error) : error);
           }).catch(fail).finally(pump);

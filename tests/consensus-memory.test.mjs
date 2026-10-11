@@ -70,6 +70,22 @@ test('a persistent single-job allocation failure stops with actionable guidance 
   assert.equal(calls, 2);
 });
 
+test('a serial allocation retry waits for asynchronous memory reclamation', async () => {
+  let reclaimed = false, timer, calls = 0;
+  try {
+    const result = await mapParallel([0], 1, () => {
+      calls++;
+      if (!reclaimed) {
+        timer ??= setTimeout(() => { reclaimed = true; }, 40);
+        throw new RangeError('WebAssembly.Memory(): could not allocate memory');
+      }
+      return 'recovered';
+    }, { budget: { limit: 1 }, retryDelay: 10 });
+    assert.deepEqual(result, ['recovered']);
+    assert.equal(calls, 2);
+  } finally { clearTimeout(timer); }
+});
+
 test('a job that failed in parallel still gets one retry after failing at a single-job limit', async () => {
   for (const recover of [true, false]) {
     const calls = new Map(), pressure = [], budget = { limit: 4 };
