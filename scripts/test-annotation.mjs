@@ -71,8 +71,8 @@ try {
   await consensus.evaluate(samples=>window.napConsensus.setFiles(samples.map((sample,index)=>new File([Array.from({length:6},(_,read)=>`@test_${index}_${read}\n${sample.sequence}\n+\n${'I'.repeat(sample.sequence.length)}\n`).join('')],`sample_${index}.fq`))),demo.samples);
   await consensus.locator('#start').click();await consensus.waitForFunction(()=>!window.napConsensus.busy && window.napConsensus.result);
   const original=await consensus.evaluate(()=>window.napConsensus.result.files.get('all.cnt.seq.qual.txt').text());
-  assert.equal(await page.locator('#open-annotation').isDisabled(),false);
-  await page.locator('#open-annotation').click();
+  assert.equal(await consensus.locator('#open-annotation').isDisabled(),false);
+  await consensus.locator('#open-annotation').click();
   assert.equal(await page.getByRole('tab',{name:/rRNA annotation/}).getAttribute('aria-selected'),'true');
   assert.equal(await annotation.evaluate(()=>window.napAnnotation.result),null);
   assert.match(await annotation.locator('#input-summary').textContent(),/get-consensusから受け取り/);

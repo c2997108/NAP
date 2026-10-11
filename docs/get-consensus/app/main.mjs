@@ -42,7 +42,11 @@ function setBusy(value) {
   if(value) {started=Date.now();timer=setInterval(()=>$('#elapsed').textContent=`${Math.floor((Date.now()-started)/1000)} 秒`,1000);}
   else {clearInterval(timer);$('#elapsed').textContent=started?`${((Date.now()-started)/1000).toFixed(1)} 秒`:'';}
 }
-function fail(error) {generation++;worker?.terminate();worker=null;setBusy(false);status(error.name==='AbortError'?'解析を中止しました。':error.message);$('#status').classList.toggle('error',error.name!=='AbortError');}
+function fail(error) {
+  generation++;worker?.terminate();worker=null;setBusy(false);
+  status(error.name==='AbortError'?'解析を中止しました。':error.message);$('#status').classList.toggle('error',error.name!=='AbortError');
+  if(error.name!=='AbortError') {history.push(`エラー詳細:\n${error.details || error.stack || error.message}`);$('#log').textContent=history.slice(-80).join('\n');}
+}
 function download(name,blob) {const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
 function options() {
   const data=new FormData(form),out={};
@@ -126,7 +130,7 @@ $('#start').onclick=()=>{
         status(p.message+(active?.length?` · ${active.length} サンプル実行中（${active.join(', ')}）`:''));
         history.push(p.message);$('#log').textContent=history.slice(-80).join('\n');$('#log').scrollTop=$('#log').scrollHeight;
       }
-      else if(data.error) fail(Object.assign(new Error(data.error.message),{name:data.error.name}));
+      else if(data.error) fail(Object.assign(new Error(data.error.message),{name:data.error.name,details:data.error.details || data.error.stack}));
       else {$('#consensus-progress-value').textContent='99% · Excelと結果画面を生成';status('Excelと結果画面を生成しています…');finish(data.result,token,provenance).catch(error=>{if(token===generation)fail(error);});}
     };
     worker.postMessage({files:selected,options:settings});

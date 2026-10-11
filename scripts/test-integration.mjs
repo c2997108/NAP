@@ -154,7 +154,7 @@ try {
   await checkSavedPage('split-all',strFromU8(splitAllArchive['split-barcode-results.html']),splitAllArchive,'split');
   await split.locator('#batch-size').fill('2');
   console.log('PASS both split ZIP layouts include exact submitted primer/sample definitions and standalone HTML with offline graphs and valid file links');
-  await page.locator('#open-consensus').click();
+  await split.locator('#open-consensus').click();
   await page.getByRole('tab',{name:/get-consensus/}).focus();
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab',{name:/split-reads/}).getAttribute('aria-selected'),'true');

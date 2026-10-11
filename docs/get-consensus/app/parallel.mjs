@@ -4,7 +4,7 @@ import { isMemoryAllocationError, memoryError } from './memory.mjs';
 export async function mapParallel(items, limit, task, { signal, onState = () => {}, budget, priority = () => 0, onMemoryPressure = () => {}, retryDelay = 250 } = {}) {
   if (!Number.isInteger(limit) || limit < 1) throw new Error('Parallel limit must be a positive integer.');
   signal?.throwIfAborted();
-  const controller = new AbortController(), active = new Set(), results = new Array(items.length), retries = new Map();
+  const controller = new AbortController(), active = new Set(), results = new Array(items.length), retries = new Map(), serialRetries = new Set();
   const pending = items.map((_, index) => index).sort((a, b) => priority(items[b], b) - priority(items[a], a) || a - b);
   if (budget) { budget.limit ??= limit; budget.memoryRetries ??= 0; }
   const capacity = () => Math.min(limit, budget?.limit ?? limit, items.length);
@@ -34,10 +34,11 @@ export async function mapParallel(items, limit, task, { signal, onState = () => 
             const attempt = (retries.get(index) || 0) + 1;
             // Drain jobs already running at the larger limit; retry only the
             // failed job. A single job is retried once after its worker closes.
-            if (budget && isMemoryAllocationError(error) && attempt <= 5 && !(launchedLimit === 1 && attempt > 1)) {
+            if (budget && isMemoryAllocationError(error) && attempt <= 5 && !(launchedLimit === 1 && serialRetries.has(index))) {
               const previous = capacity();
               if (previous === launchedLimit) budget.limit = Math.max(1, Math.floor(previous / 2));
               budget.memoryRetries++; retries.set(index, attempt); pending.unshift(index);
+              if (launchedLimit === 1) serialRetries.add(index);
               readyAt = Date.now() + retryDelay;
               onMemoryPressure({ index, previous, limit: capacity(), attempt, error }); report();
             } else fail(isMemoryAllocationError(error) ? memoryError(error) : error);

@@ -3,6 +3,7 @@ const appVersion=$('app-version').dataset.version;
 const stages=['split-reads','get-consensus','annotation'];
 const splitFrame=$('split-frame'),consensusFrame=$('consensus-frame'),annotationFrame=$('annotation-frame');
 const frames={'split-reads':splitFrame,'get-consensus':consensusFrame,annotation:annotationFrame};
+const stageActions={};
 let active='split-reads',signature='',selected=new Set(),transferToken=0,transferring=false;
 const split=()=>splitFrame.contentWindow.napSplit;
 const consensus=()=>consensusFrame.contentWindow.napConsensus;
@@ -39,8 +40,8 @@ function updateControls() {
   const count=splitState?.files.length||0;
   $('selection-count').textContent=`${selected.size} / ${count} ファイル選択`;
   $('transfer-selected').disabled=transferring || !selected.size || !splitState || splitState.busy || !consensusState || consensusState.busy;
-  $('open-consensus').disabled=!count;
-  $('open-annotation').disabled=!consensusState?.table || consensusState.busy;
+  if(stageActions['open-consensus'])stageActions['open-consensus'].disabled=!count;
+  if(stageActions['open-annotation'])stageActions['open-annotation'].disabled=!consensusState?.table || consensusState.busy;
   $('transfer-consensus').disabled=!consensusState?.table || consensusState.busy || !annotationState || annotationState.busy;
   $('consensus-output-summary').textContent=consensusState?.table?`${consensusState.table.name} · ${consensusState.table.representatives} 代表配列 · ${consensusState.table.samples} サンプル`:'get-consensusを実行すると、ここから集計表を渡せます。';
   for(const control of $('handoff-files').querySelectorAll('input,button'))control.disabled=transferring;
@@ -77,7 +78,7 @@ $('sample-filter').oninput=()=>{const term=$('sample-filter').value.toLowerCase(
 for(const [id,checked] of [['select-all',true],['select-none',false]])$(id).onclick=()=>{
   selected.clear();for(const checkbox of $('split-output-list').querySelectorAll('input')) {checkbox.checked=checked;if(checked)selected.add(checkbox.dataset.outputName);}updateControls();
 };
-$('open-consensus').onclick=()=>{activate('get-consensus');window.scrollTo({top:0,behavior:'smooth'});};
+const openConsensus=()=>{activate('get-consensus');window.scrollTo({top:0,behavior:'smooth'});};
 $('transfer-selected').onclick=async()=>{
   const state=split()?.state;if(!state || consensus()?.state.busy || transferring || !selected.size)return;
   const token=++transferToken;transferring=true;updateControls();
@@ -100,14 +101,20 @@ const transferConsensus=()=>{
     $('annotation-transfer-status').classList.remove('error');activate('annotation');
   } catch(error) {$('annotation-transfer-status').textContent=error.message;$('annotation-transfer-status').classList.add('error');}
 };
-$('transfer-consensus').onclick=transferConsensus;$('open-annotation').onclick=transferConsensus;
-for(const [frame,event,refresh] of [[splitFrame,'nap:split-state',refreshOutputs],[consensusFrame,'nap:consensus-state',updateControls],[annotationFrame,'nap:annotation-state',updateControls]]) {
+$('transfer-consensus').onclick=transferConsensus;
+for(const [frame,event,refresh,actionId,onNext] of [[splitFrame,'nap:split-state',refreshOutputs,'open-consensus',openConsensus],[consensusFrame,'nap:consensus-state',updateControls,'open-annotation',transferConsensus],[annotationFrame,'nap:annotation-state',updateControls]]) {
   const connect=()=>{
     if(!frame.contentWindow.napSplit && !frame.contentWindow.napConsensus && !frame.contentWindow.napAnnotation) {
       frame.contentWindow.addEventListener('nap:ready',connect,{once:true});updateControls();return;
     }
     if(frame.contentDocument.body.dataset.napConnected)return;
     frame.contentDocument.body.dataset.napConnected='true';
+    // Keep the handoff beside the engine's run controls. Standalone engines
+    // leave this action hidden because there is no next tab to open.
+    if(actionId) {
+      const button=frame.contentDocument.getElementById(actionId);
+      stageActions[actionId]=button;button.hidden=false;button.onclick=onNext;
+    }
     frame.contentWindow.addEventListener(event,refresh);
     new ResizeObserver(()=>resize(frame)).observe(frame.contentDocument.body);
     refresh();resize(frame);

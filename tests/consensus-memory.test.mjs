@@ -5,7 +5,7 @@ import { gzipSync } from 'node:zlib';
 import { ByteOutput } from '../public/get-consensus/app/byte-output.mjs';
 import { readFastq, streamFastq } from '../public/get-consensus/app/sequence.mjs';
 import { mapParallel } from '../public/get-consensus/app/parallel.mjs';
-import { isMemoryAllocationError } from '../public/get-consensus/app/memory.mjs';
+import { isMemoryAllocationError, memoryError, errorDetails } from '../public/get-consensus/app/memory.mjs';
 import { toolScope } from '../public/get-consensus/app/tool-scope.mjs';
 import { ConsensusPipeline, validateOptions } from '../public/get-consensus/app/pipeline.mjs';
 import { phasePositions, haplotypes } from '../public/get-consensus/app/haplotype.mjs';
@@ -70,6 +70,22 @@ test('a persistent single-job allocation failure stops with actionable guidance 
   assert.equal(calls, 2);
 });
 
+test('a job that failed in parallel still gets one retry after failing at a single-job limit', async () => {
+  for (const recover of [true, false]) {
+    const calls = new Map(), pressure = [], budget = { limit: 4 };
+    const running = mapParallel([0, 1, 2, 3], 4, async item => {
+      const call = (calls.get(item) || 0) + 1; calls.set(item, call);
+      if (item === 0 && (!recover || call < 4)) throw Error('WebAssembly.Memory(): could not allocate memory');
+      return item;
+    }, { budget, retryDelay: 0, onMemoryPressure: state => pressure.push(state.limit) });
+    if (recover) assert.deepEqual(await running, [0, 1, 2, 3]);
+    else await assert.rejects(running, /解析用メモリー/);
+    assert.deepEqual(pressure, [2, 1, 1]);
+    assert.equal(calls.get(0), 4);
+    assert.equal(budget.memoryRetries, 3);
+  }
+});
+
 test('non-memory failures cancel peer workers and external cancellation stops queued jobs', async () => {
   let peerCancelled = false;
   await assert.rejects(mapParallel([0, 1, 2], 2, async (item, _, signal) => {
@@ -91,6 +107,14 @@ test('native MAFFT allocation diagnostics enter memory recovery without retrying
   for (const message of ['memory access out of bounds', 'Cannot open OOM.fa', 'Invalid FASTQ']) {
     assert.equal(isMemoryAllocationError(Error(message)), false);
   }
+});
+
+test('memory diagnostics retain the original allocation failure across wrapped and cyclic causes', () => {
+  const original = new RangeError('WebAssembly.Memory(): could not allocate memory');
+  const failure = memoryError(memoryError(original));
+  assert.match(errorDetails(failure), /RangeError: WebAssembly.Memory\(\): could not allocate memory/);
+  original.cause = failure;
+  assert.equal(errorDetails(failure).split('原因:').length, 3);
 });
 
 test('a failed input transfer terminates both tool and sample workers before memory recovery', async () => {

@@ -90,7 +90,7 @@ try {
   assert.equal(run.summary.totalReads, 12); assert.equal(run.summary.assignedReads, 12); assert.equal(run.summary.segments, 12);
   assert.deepEqual(run.summary.samples.map(sample => sample.segments), [6, 6]);
   console.log('PASS split 12 synthetic reads on headerless hosting');
-  await page.locator('#open-consensus').click(); await page.locator('#transfer-selected').click();
+  await split.locator('#open-consensus').click(); await page.locator('#transfer-selected').click();
   await consensus.waitForFunction(() => window.napConsensus.inputs.length === 2);
   assert.equal(await consensus.locator('#start').isEnabled(), true);
   await consensus.locator('#start').click();
@@ -101,7 +101,7 @@ try {
   assert.deepEqual(result.manifest.samples.map(sample => sample.assigned), [6, 6]);
   assert.deepEqual(result.sequences.sort(), expected.samples.map(sample => sample.sequence).sort());
   console.log('PASS actual BLAST split 12 reads -> VSEARCH/MAFFT/consensus -> two representatives without server isolation headers');
-  await page.locator('#open-annotation').click();
+  await consensus.locator('#open-annotation').click();
   assert.match(await annotation.locator('#input-summary').textContent(),/get-consensusから受け取り/);
   await annotation.locator('#demo').click();await annotation.locator('#start').click();
   await annotation.waitForFunction(()=>!window.napAnnotation.state.busy && window.napAnnotation.result);

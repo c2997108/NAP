@@ -60,7 +60,7 @@
       <details class="definition-preview" open><summary>生成ファイルのプレビュー</summary><div><label>primer.fasta<textarea id="primer-preview" readonly spellcheck="false" aria-label="primer.fasta プレビュー"></textarea></label><label>sample.txt<textarea id="sample-preview" readonly spellcheck="false" aria-label="sample.txt プレビュー"></textarea></label></div></details>
     </fieldset>
   </section>
-  <button id="split" class="primary run">FASTQ を分割する</button>
+  <div class="run-actions split-run-actions"><button id="split" class="primary run">FASTQ を分割する</button><button id="open-consensus" class="primary next-stage" hidden disabled>分割結果を選んでget-consensusへ →</button></div>
   <section class="card output"><div class="section-head"><h2><span class="step">3</span>分割結果</h2><div class="download-actions"><button id="download-fastq-zip" class="secondary fastq-download" disabled>分割 FASTQ をまとめて保存</button><button id="download-zip" class="secondary" disabled>すべて ZIP で保存</button></div></div>
     <p class="hint">どちらの ZIP にも結果ページ（HTML）と、解析に使用した primer.fa・sample.txt を含みます。「分割 FASTQ をまとめて保存」はサンプル別 FASTQ とこれらの保存ファイルをまとめます。</p>
     <progress id="progress" max="1" value="0" aria-label="入力の処理状況"></progress><p id="progress-label" class="hint">FASTQ の読取り → BLAST → バーコード確認 → トリミング・分割</p>

@@ -7,3 +7,12 @@ export function memoryError(error) {
   failure.name = 'MemoryAllocationError'; failure.code = 'WASM_MEMORY'; failure.cause = error;
   return failure;
 }
+
+export function errorDetails(error) {
+  const details = [], seen = new Set();
+  while (error && !seen.has(error)) {
+    seen.add(error); details.push(error.stack || error.message || String(error));
+    error = error.cause;
+  }
+  return details.join('\n原因:\n');
+}

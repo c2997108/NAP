@@ -64,7 +64,7 @@ try {
   assert.equal(autoRun.summary.sampleDefinitions,4);
   assert.deepEqual(autoRun.summary.samples.map(sample=>sample.segments),[6,6]);
   assert.equal(autoRun.summary.assignedReads,12);
-  await page.locator('#open-consensus').click();
+  await split.locator('#open-consensus').click();
   assert.equal(await page.locator('#split-output-list input').count(),2);
   await page.locator('#select-all').click();assert.equal(await page.locator('#split-output-list input:checked').count(),2);
   await page.locator('#transfer-selected').click();await consensus.waitForFunction(()=>window.napConsensus.inputs.length===2);
@@ -136,7 +136,7 @@ try {
   assert.deepEqual(run.summary.samples.map(sample=>sample.segments),[6,6]);
   const fasta=await split.evaluate(async()=> (await window.demultiplexer.readFile('primer-clean.fa')).text());
   assert.match(fasta,/>F_A_edited\n/);assert.match(fasta,/>R_B_edited\n/);
-  await page.locator('#open-consensus').click();await page.locator('#transfer-selected').click();
+  await split.locator('#open-consensus').click();await page.locator('#transfer-selected').click();
   await consensus.waitForFunction(()=>window.napConsensus.inputs.length===2);await consensus.locator('#start').click();
   await consensus.waitForFunction(()=>!window.getConsensus.busy);
   const result=await consensus.evaluate(()=>window.getConsensus.result && ({manifest:window.getConsensus.result.manifest,sequences:window.getConsensus.result.rows.map(row=>row.seq)}));

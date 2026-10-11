@@ -1,5 +1,5 @@
 import { ConsensusPipeline } from './pipeline.mjs';
-import { isMemoryAllocationError, memoryError } from './memory.mjs';
+import { isMemoryAllocationError, memoryError, errorDetails } from './memory.mjs';
 let controller;
 self.onmessage=async({data})=>{
   if(data.cancel) {controller?.abort();return;}
@@ -13,6 +13,6 @@ self.onmessage=async({data})=>{
     const result=await new ConsensusPipeline({onProgress:progress}).run(data.files,data.options,controller.signal);
     flush();
     self.postMessage({result});
-  } catch(error) {flush();if(isMemoryAllocationError(error))error=memoryError(error);self.postMessage({error:{message:error.message,stack:error.stack,name:error.name}});}
+  } catch(error) {flush();if(isMemoryAllocationError(error) && error.name!=='MemoryAllocationError')error=memoryError(error);self.postMessage({error:{message:error.message,stack:error.stack,name:error.name,details:errorDetails(error)}});}
   finally{clearTimeout(timer);self.close();}
 };

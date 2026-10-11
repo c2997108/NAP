@@ -6,7 +6,7 @@
   <link rel="icon" href="data:,"><link rel="stylesheet" href="./nap.css">
 </head>
 <body>
-  <header class="app-header"><div class="brand"><span class="brand-mark">NAP</span><div><div class="brand-title"><h1>Nanopore Amplicon Pipeline</h1><!-- app-version:start --><span id="app-version" class="app-version" data-version="1.0.0" data-build="50443ba3bfcf" data-updated-at="2026-10-10T23:10:43.207Z" title="表示中のNAPのバージョン・配布ファイルのビルドID・最終更新日時（日本標準時）">v1.0.0<span class="build-id">ビルド 50443ba3bfcf</span><time class="updated-at" datetime="2026-10-10T23:10:43.207Z">最終更新 2026-10-11 08:10:43 JST</time></span><!-- app-version:end --></div><p>FASTQの分割から、コンセンサス配列・分類まで。</p></div></div><span class="local-badge">● ブラウザ内で解析</span></header>
+  <header class="app-header"><div class="brand"><span class="brand-mark">NAP</span><div><div class="brand-title"><h1>Nanopore Amplicon Pipeline</h1><!-- app-version:start --><span id="app-version" class="app-version" data-version="1.0.0" data-build="ec1eae04cf11" data-updated-at="2026-10-11T00:06:41.710Z" title="表示中のNAPのバージョン・配布ファイルのビルドID・最終更新日時（日本標準時）">v1.0.0<span class="build-id">ビルド ec1eae04cf11</span><time class="updated-at" datetime="2026-10-11T00:06:41.710Z">最終更新 2026-10-11 09:06:41 JST</time></span><!-- app-version:end --></div><p>FASTQの分割から、コンセンサス配列・分類まで。</p></div></div><span class="local-badge">● ブラウザ内で解析</span></header>
   <main>
     <div class="workspace-bar"><div class="tabs" role="tablist" aria-label="解析ステップ">
       <button id="tab-split-reads" role="tab" aria-selected="true" aria-controls="panel-split-reads"><span>01</span> split-reads</button>
@@ -14,11 +14,11 @@
       <button id="tab-annotation" role="tab" aria-selected="false" aria-controls="panel-annotation" tabindex="-1"><span>03</span> rRNA annotation</button>
     </div><p id="workspace-status" role="status" aria-live="polite">入力待ち</p></div>
     <section id="panel-split-reads" role="tabpanel" aria-labelledby="tab-split-reads">
-      <div class="stage-heading"><div><h2>サンプルごとにFASTQを分割</h2><p>FASTQ、primer.fa、sample.txtを指定します。分割結果は次のタブへ渡せます。</p></div><button id="open-consensus" class="primary" disabled>分割結果を選んでget-consensusへ →</button></div>
+      <div class="stage-heading"><div><h2>サンプルごとにFASTQを分割</h2><p>FASTQ、primer.fa、sample.txtを指定します。分割結果は次のタブへ渡せます。</p></div></div>
       <iframe id="split-frame" data-src="./split-reads/" title="split-reads" allow="cross-origin-isolated"></iframe>
     </section>
     <section id="panel-get-consensus" role="tabpanel" aria-labelledby="tab-get-consensus" hidden>
-      <div class="stage-heading"><div><h2>選んだFASTQからコンセンサスを作成</h2><p>分割結果を渡すか、下のファイル選択欄から保存済みFASTQを読み込みます。</p></div><button id="open-annotation" class="primary" disabled>結果をrRNA annotationへ →</button></div>
+      <div class="stage-heading"><div><h2>選んだFASTQからコンセンサスを作成</h2><p>分割結果を渡すか、下のファイル選択欄から保存済みFASTQを読み込みます。</p></div></div>
       <section class="handoff-card" aria-labelledby="handoff-title">
         <div class="handoff-head"><h3 id="handoff-title">split-readsの分割結果</h3><span id="selection-count">0 ファイル選択</span></div>
         <p id="handoff-empty">split-readsで分割すると、ここにサンプル別FASTQが表示されます。</p>

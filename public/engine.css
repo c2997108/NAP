@@ -3,4 +3,9 @@ body { display: flow-root; background: #f4f7f5; }
 body > header, main > nav, main > header, .intro, footer { display: none; }
 main { max-width: 1320px; margin: 0 auto; padding: 12px 0 24px; }
 .card { border-color: #d8e2db; }
+.run-actions { flex-wrap:wrap; }
+.split-run-actions { display:flex; align-items:center; gap:12px; margin-top:20px; }
+.split-run-actions > button { width:auto; margin-top:0; padding:14px; }
+.split-run-actions .run { flex:1; }
+@media(max-width:720px) { .run-actions .next-stage { width:100%; } .split-run-actions .run { flex-basis:100%; } }
 @media(max-width:720px) { main { padding: 8px 0 20px; } .toolbar { flex-wrap:wrap; } }
