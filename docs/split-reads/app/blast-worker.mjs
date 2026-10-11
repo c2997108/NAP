@@ -1,4 +1,5 @@
 import { normalizeArguments, filePath } from './arguments.mjs';
+import { trackWasmMemory } from '../../shared/worker-memory.mjs';
 
 const files = new Map();
 const binaries = new Map();
@@ -43,27 +44,30 @@ async function run(id, command, args) {
   // Each invocation gets a fresh runtime; only /work files survive between commands.
   let exitCode = 0;
   const module = await factory({ wasmBinary: binaries.get(command), noInitialRun: true, thisProgram: `/work/${command}`, onExit: code => { exitCode = code; }, print: log('stdout', stdout), printErr: log('stderr', stderr) });
-  module.FS.mkdir('/work');
-  module.FS.chdir('/work');
-  for (const [name, data] of files) {
-    module.FS.mkdirTree(name.slice(0, name.lastIndexOf('/')));
-    module.FS.writeFile(name, data);
-  }
-  const start = performance.now();
+  const releaseMemory = trackWasmMemory(module.HEAPU8?.buffer);
   try {
-    const status = module.callMain([...normalized]);
-    if (Number.isInteger(status)) exitCode = status;
-  } catch (error) {
-    if (error.name === 'ExitStatus' || Number.isInteger(error.status)) exitCode = error.status;
-    else throw new Error(`${command}: ${error.message || error}`);
-  }
-  // EXIT_RUNTIME may report an exit through quit() without propagating an exception.
-  if (Number.isInteger(module.EXITSTATUS)) exitCode = module.EXITSTATUS;
-  const saved = new Map();
-  capture(module.FS, '/work', saved);
-  files.clear();
-  for (const [name, data] of saved) files.set(name, data);
-  return { command, args: normalized, exitCode, stdout: stdout.join('\n'), stderr: stderr.join('\n'), elapsedMs: performance.now() - start, files: listFiles() };
+    module.FS.mkdir('/work');
+    module.FS.chdir('/work');
+    for (const [name, data] of files) {
+      module.FS.mkdirTree(name.slice(0, name.lastIndexOf('/')));
+      module.FS.writeFile(name, data);
+    }
+    const start = performance.now();
+    try {
+      const status = module.callMain([...normalized]);
+      if (Number.isInteger(status)) exitCode = status;
+    } catch (error) {
+      if (error.name === 'ExitStatus' || Number.isInteger(error.status)) exitCode = error.status;
+      else throw new Error(`${command}: ${error.message || error}`);
+    }
+    // EXIT_RUNTIME may report an exit through quit() without propagating an exception.
+    if (Number.isInteger(module.EXITSTATUS)) exitCode = module.EXITSTATUS;
+    const saved = new Map();
+    capture(module.FS, '/work', saved);
+    files.clear();
+    for (const [name, data] of saved) files.set(name, data);
+    return { command, args: normalized, exitCode, stdout: stdout.join('\n'), stderr: stderr.join('\n'), elapsedMs: performance.now() - start, files: listFiles() };
+  } finally { releaseMemory(); }
 }
 
 function listFiles() {

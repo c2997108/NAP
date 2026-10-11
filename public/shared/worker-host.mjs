@@ -3,15 +3,24 @@
 // disposed independently, including on failure or cancellation.
 const inWorker = typeof WorkerGlobalScope !== 'undefined' && globalThis instanceof WorkerGlobalScope;
 const oneShot = url => /\/(pipeline-worker|demultiplex-worker|sample-worker|tool-worker|zip-worker)\.mjs$/.test(new URL(url, import.meta.url).pathname);
+const memoryKey = Symbol.for('nap.workerMemory');
+export function getWorkerMemory(environment = globalThis) {
+  return environment[memoryKey]?.() || { bytes: 0, instances: 0, workers: 0 };
+}
 
 function transfers(data, buffers = new Set(), seen = new Set()) {
-  if (!data || typeof data !== 'object' || seen.has(data)) return [...buffers];
-  seen.add(data);
-  if (data instanceof ArrayBuffer) buffers.add(data);
-  else if (ArrayBuffer.isView(data)) { if (data.buffer instanceof ArrayBuffer) buffers.add(data.buffer); }
-  else if (data instanceof Map) for (const [key, value] of data) { transfers(key, buffers, seen); transfers(value, buffers, seen); }
-  else if (Array.isArray(data)) for (const value of data) transfers(value, buffers, seen);
-  else if (!(data instanceof Blob)) for (const value of Object.values(data)) transfers(value, buffers, seen);
+  function collect(value) {
+    if (!value || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    if (value instanceof ArrayBuffer) buffers.add(value);
+    else if (ArrayBuffer.isView(value)) { if (value.buffer instanceof ArrayBuffer) buffers.add(value.buffer); }
+    else if (value instanceof Map) for (const [key, item] of value) { collect(key); collect(item); }
+    else if (Array.isArray(value)) for (const item of value) collect(item);
+    else if (!(value instanceof Blob)) for (const item of Object.values(value)) collect(item);
+  }
+  // Materialize the transfer list once, rather than copying the growing set
+  // for every part of a large FASTQ result.
+  collect(data);
   return [...buffers];
 }
 
@@ -41,18 +50,27 @@ if (inWorker) {
     terminate() {
       if (this.stopped) return;
       this.stopped = true; this.onmessage = this.onerror = null;
-      this.port.postMessage({ type: 'terminate' }); this.port.close();
+      this.port.postMessage({ type: 'terminate' }); this.port.onmessage = null; this.port.close(); this.port = null;
     }
   };
 } else if (typeof window !== 'undefined') {
   const NativeWorker = globalThis.Worker, workers = new Set();
+  globalThis[memoryKey] = () => ({
+    bytes: [...workers].reduce((sum, record) => sum + (record.memory?.bytes || 0), 0),
+    instances: [...workers].reduce((sum, record) => sum + (record.memory?.instances || 0), 0),
+    workers: workers.size
+  });
   function forget(record, force = false) {
     if (!workers.delete(record)) return;
     for (const child of [...workers]) if (child.parent === record) forget(child, true);
-    record.worker.removeEventListener('message', record.message);
-    record.worker.removeEventListener('error', record.error);
-    record.host.close(); record.port?.close();
-    if (force) NativeWorker.prototype.terminate.call(record.worker);
+    const { worker, host, port } = record;
+    worker.removeEventListener('message', record.message);
+    worker.removeEventListener('error', record.error);
+    host.onmessage = null; host.close();
+    if (port) { port.onmessage = null; port.close(); }
+    if (worker.record === record) worker.record = null;
+    record.worker = record.parent = record.host = record.port = record.message = record.error = record.memory = null;
+    if (force) NativeWorker.prototype.terminate.call(worker);
   }
   function own(worker, url, parent, port) {
     const channel = new MessageChannel(), record = { worker, parent, port, host: channel.port1 };
@@ -61,7 +79,11 @@ if (inWorker) {
       try { own(new NativeWorker(data.url, data.options), data.url, record, data.port); }
       catch (error) { data.port.postMessage({ type: 'error', message: error.message }); data.port.close(); }
     };
-    record.message = ({ data }) => {
+    record.message = event => {
+      const { data } = event;
+      if (data?.napWasmMemory) {
+        event.stopImmediatePropagation(); record.memory = data.napWasmMemory; return;
+      }
       port?.postMessage({ type: 'message', data }, transfers(data));
       if ((oneShot(url) && (data.result || data.error)) || data.type === 'disposed') forget(record);
     };

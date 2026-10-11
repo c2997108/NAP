@@ -1,13 +1,24 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createServer } from './serve.mjs';
 import { formatMemory } from '../public/shared/memory-monitor.mjs';
 
 const output = fileURLToPath(new URL('../test-results/', import.meta.url)); await mkdir(output, { recursive: true });
-const server = createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+// Hold a real WASM command briefly so the two-second live display can be
+// checked deterministically. Only this test server changes the source.
+const blastSource = (await readFile(new URL('../public/split-reads/app/blast-worker.mjs', import.meta.url), 'utf8'))
+  .replace('module.callMain([...normalized])', `(() => { if (!globalThis.__memoryPause) { globalThis.__memoryPause = true; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2200); } return module.callMain([...normalized]); })()`);
+const server = createServer(), serveStatic = server.listeners('request')[0];
+server.removeListener('request', serveStatic);
+server.on('request', (req, res) => {
+  if (new URL(req.url, 'http://localhost').pathname !== '/split-reads/app/blast-worker.mjs') return serveStatic(req, res);
+  res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp', 'Cache-Control': 'no-store' });
+  res.end(blastSource);
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`, channel = process.env.BROWSER_CHANNEL || 'chrome';
 let browser;
 try {
@@ -46,7 +57,7 @@ try {
   if (canMeasure) {
     await split.locator('#memory-measure').click();
     const cdp = await page.context().newCDPSession(page); await cdp.send('HeapProfiler.collectGarbage');
-    await split.waitForFunction(() => document.getElementById('memory-app-label').textContent.includes('NAPの使用量'));
+    await split.waitForFunction(() => !document.getElementById('memory-measure').disabled && /[MGK]iB/.test(document.getElementById('memory-app-used').textContent));
     assert.match(await split.locator('#memory-app-used').textContent(), /[MGK]iB/);
     assert.match(await split.locator('#memory-app-detail').textContent(), /測定/);
     await cdp.detach();
@@ -92,7 +103,8 @@ try {
   const fixtureConsensus = fixture.frames().find(frame => frame.url() === base + '/get-consensus/');
   let fixturePanel = fixtureConsensus;
   await fixturePanel.locator('#memory-title').click();
-  assert.equal(await fixturePanel.locator('#memory-app-used').textContent(), '64.0 MiB');
+  assert.equal(await fixturePanel.locator('#memory-app-used').textContent(), '未測定');
+  assert.equal(await fixturePanel.locator('#memory-heap-used').textContent(), '64.0 MiB');
   assert.equal(await fixturePanel.locator('#memory-auto-budget').textContent(), '1.00 GiB');
   assert.equal(await fixturePanel.locator('#memory-heap-limit').textContent(), '256.0 MiB');
   assert.equal(await fixturePanel.locator('#memory-headroom').textContent(), '192.0 MiB');
@@ -111,6 +123,7 @@ try {
   assert.equal(await fixturePanel.evaluate(() => window.memoryTest.calls), 0, 'Measurement uses the parent page and includes all stages');
   await fixture.evaluate(() => { window.memoryTest.heap.usedJSHeapSize = 72 * 1024 ** 2; });
   await fixturePanel.waitForFunction(() => document.getElementById('memory-heap-detail').textContent.includes('184.0 MiB'), { timeout: 10000 });
+  assert.equal(await fixturePanel.locator('#memory-heap-used').textContent(), '72.0 MiB');
   assert.equal(await fixturePanel.locator('#memory-app-used').textContent(), '300.0 MiB', 'Measured sample is kept separate from periodic heap updates');
   assert.equal(await fixture.evaluate(() => window.memoryTest.calls), 1, 'Automatic refresh does not trigger detailed measurements');
   await fixture.evaluate(() => { window.memoryTest.reject = true; }); await fixturePanel.locator('#memory-measure').click();
@@ -119,7 +132,34 @@ try {
   await fixture.evaluate(() => { window.memoryTest.heap.usedJSHeapSize = 80 * 1024 ** 2; });
   await fixturePanel.locator('#memory-refresh').click();
   assert.equal(await fixturePanel.locator('#memory-headroom').textContent(), '176.0 MiB');
-  console.log('PASS periodic heap updates, manual refresh/measurement, pending/error handling and independent metrics');
+  await fixture.evaluate(() => { window.memoryTest.reject = false; });
+  await fixturePanel.locator('#memory-measure').click();
+  await fixture.evaluate(() => window.memoryTest.resolve({ bytes: 1024 ** 3 }));
+  await fixturePanel.waitForFunction(() => !document.getElementById('memory-measure').disabled);
+  assert.equal(await fixturePanel.locator('#memory-app-used').textContent(), '1.00 GiB');
+  await fixturePanel.locator('#load-test').click();
+  await fixturePanel.waitForFunction(() => !document.getElementById('split').disabled);
+  await fixturePanel.locator('#split').click();
+  assert.equal(await fixturePanel.locator('#memory-app-label').textContent(), 'NAPの使用量（前回の測定）');
+  await fixture.waitForFunction(() => window.memoryTest.calls === 4);
+  await fixturePanel.waitForFunction(() => document.getElementById('memory-wasm-used').textContent !== '0 MiB');
+  const liveWasm = await fixturePanel.evaluate(() => window[Symbol.for('nap.workerMemory')]());
+  assert.ok(liveWasm.bytes > 0 && liveWasm.instances > 0 && liveWasm.workers > 0);
+  assert.equal(await fixturePanel.evaluate(() => window.napSplit.state.busy), true);
+  await fixture.evaluate(() => window.memoryTest.resolve({ bytes: 512 * 1024 ** 2 }));
+  await fixturePanel.waitForFunction(() => document.getElementById('memory-app-used').textContent === '512.0 MiB');
+  assert.equal(await fixturePanel.evaluate(() => window.napSplit.state.busy), true, 'NAP-wide estimates refresh during an actual WASM run');
+  await fixturePanel.locator('#memory-panel').screenshot({ path: path.join(output, 'memory-monitor-running.png') });
+  await fixturePanel.waitForFunction(() => !window.napSplit.state.busy && window.napSplit.state.files.length === 2);
+  await fixture.waitForFunction(() => window.memoryTest.calls === 5);
+  await fixture.evaluate(() => window.memoryTest.resolve({ bytes: 12 * 1024 ** 2 }));
+  await fixturePanel.waitForFunction(() => document.getElementById('memory-app-used').textContent === '12.0 MiB');
+  assert.equal(await fixtureConsensus.locator('#memory-app-used').textContent(), '12.0 MiB', 'Completion measurement is shared with the next stage');
+  assert.equal(await fixturePanel.locator('#sample-results tbody tr').count(), 2, 'Result charts and statistics survive cleanup');
+  assert.equal(await fixturePanel.evaluate(() => window.demultiplexer.worker), null);
+  await fixturePanel.waitForFunction(() => document.getElementById('memory-wasm-used').textContent === '0 MiB');
+  assert.deepEqual(await fixturePanel.evaluate(() => window[Symbol.for('nap.workerMemory')]()), { bytes: 0, instances: 0, workers: 0 });
+  console.log(`PASS two-second heap/WASM display (${formatMemory(liveWasm.bytes)} in a real command), non-overlapping analysis sampling, and completion sampling while keeping split results`);
 
   const unsupported = await browser.newPage();
   unsupported.on('pageerror', error => errors.push(error.message));

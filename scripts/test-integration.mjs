@@ -350,6 +350,7 @@ try {
   console.log('PASS mixed header annotations and missing/invalid scores across two concurrent files, correct coverage/percentages and mobile charts');
   await page.setViewportSize({width:1440,height:1000});
   await split.evaluate(()=>window.napSplit.setInputs(window.noQualityTestInputs));
+  assert.deepEqual(await split.evaluate(()=>({files:window.demultiplexer.files.size,report:window.demultiplexer.fastqReport,bytes:window.napSplit.state.resultBytes})),{files:0,report:null,bytes:0},'Replacing split inputs releases outputs that are no longer displayed');
   await split.waitForFunction(()=>!document.getElementById('split').disabled);
   await split.locator('#split').click();
   await split.waitForFunction(()=>!window.napSplit.state.busy && window.napSplit.state.files.length===1);

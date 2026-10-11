@@ -30,8 +30,9 @@ export class FileProcessingSlot {
     // the parent. A timeout still closes a crashed/unresponsive file worker.
     this.closing = new Promise(resolve => {
       const finish = (terminate = true) => {
-        clearTimeout(timer); if (terminate) this.worker.terminate();
-        this.worker.onmessage = this.worker.onerror = null;
+        const worker = this.worker; this.worker = null;
+        clearTimeout(timer);
+        if (worker) { worker.onmessage = worker.onerror = null; if (terminate) worker.terminate(); }
         this.configuration = this.onProgress = null; resolve();
       };
       const timer = setTimeout(finish, 1000);

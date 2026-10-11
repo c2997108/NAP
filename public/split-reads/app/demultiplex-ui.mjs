@@ -84,7 +84,7 @@ function saveButton(name, label = '保存') {
   button.onclick = async () => { try { await saveBlob(await client.readFile(name), name.split('/').at(-1)); } catch (error) { status(error.message, true); } };
   return button;
 }
-function clearResults() { latest = null; resultRevision++; $('summary').replaceChildren(); $('files').replaceChildren(); $('sample-results').querySelector('tbody').replaceChildren(); $('file-progress').querySelector('tbody').replaceChildren(); $('file-progress').hidden = true; progressRows.clear(); $('result-note').textContent = ''; setProgress(0); $('download-zip').disabled = true; $('download-fastq-zip').disabled = true; notifyState(); }
+function clearResults() { client.dispose(); latest = null; resultRevision++; $('summary').replaceChildren(); $('files').replaceChildren(); $('sample-results').querySelector('tbody').replaceChildren(); $('file-progress').querySelector('tbody').replaceChildren(); $('file-progress').hidden = true; progressRows.clear(); $('result-note').textContent = ''; setProgress(0); $('download-zip').disabled = true; $('download-fastq-zip').disabled = true; notifyState(); }
 function showResult(result) {
   latest = result; const s = result.summary; $('summary').replaceChildren();
   setProgress(1);

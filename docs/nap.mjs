@@ -1,5 +1,6 @@
 import { selectFastqFiles } from './shared/fastq-selection.mjs';
 import { startMemoryMonitor } from './shared/memory-monitor.mjs';
+import { getWorkerMemory } from './shared/worker-host.mjs';
 
 const $=id=>document.getElementById(id);
 const appVersion=$('app-version').dataset.version;
@@ -11,7 +12,11 @@ const stageApis={'split-reads':'napSplit','get-consensus':'napConsensus',annotat
 const retainedResults=stages.map(name=>({name,bytes:0}));
 let active='split-reads',signature='',selected=new Set(),transferToken=0,transferring=false;
 let outputFiles=[],visibleFiles=[];
-const memoryMonitor=startMemoryMonitor({getResults:()=>retainedResults});
+const memoryMonitor=startMemoryMonitor({getResults:()=>retainedResults,getWorkers:()=>Object.values(frames).reduce((sum,frame)=>{
+  const snapshot=getWorkerMemory(frame.contentWindow);
+  for(const key of ['bytes','instances','workers'])sum[key]+=snapshot[key];
+  return sum;
+},{bytes:0,instances:0,workers:0})});
 const outputRows=new Map();
 const filterInputs=['sample-filter','min-reads-filter','min-length-filter','max-length-filter'].map($);
 const selectedFiles=()=>visibleFiles.filter(file=>selected.has(file.name));
@@ -47,7 +52,9 @@ for(const stage of stages) {
 window.addEventListener('hashchange',()=>activate(location.hash.slice(1)));
 function updateControls() {
   const splitState=split()?.state,consensusState=consensus()?.state,annotationState=annotation()?.state;
-  [splitState,consensusState,annotationState].forEach((state,index)=>{retainedResults[index].bytes=state?.resultBytes || 0;});
+  [splitState,consensusState,annotationState].forEach((state,index)=>{
+    Object.assign(retainedResults[index],{bytes:state?.resultBytes || 0,busy:!!state?.busy,revision:state?.revision || 0});
+  });
   const count=splitState?.files.length||0;
   const chosen=selectedFiles().length;
   $('selection-count').textContent=`${chosen} ファイルを受け渡し`;

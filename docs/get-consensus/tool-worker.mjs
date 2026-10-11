@@ -2,6 +2,7 @@ import { alignMafft } from './mafft.mjs';
 import { ByteOutput } from './app/byte-output.mjs';
 import { isMemoryAllocationError } from './app/memory.mjs';
 import { byteTransfers } from '../shared/output-blob.mjs';
+import { trackWasmMemory } from '../shared/worker-memory.mjs';
 const commands = new Set(['vsearch', 'cd-hit', 'cd-hit-est', 'minimap2', 'samtools', 'blastn', 'makeblastdb',
   ...['tbfast','disttbfast','dvtditr','pairlocalalign','dndpre','makedirectionlist','setdirection','f2cl','countlen'].map(name => 'mafft-' + name)]);
 const encoder = new TextEncoder();
@@ -52,7 +53,7 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
   const input = typeof stdin === 'string' ? encoder.encode(stdin) : stdin;
   const stdout = new ByteOutput(), stderr = new ByteOutput();
   let inputIndex = 0;
-  let instance, pthreadWorkers = [];
+  let instance, pthreadWorkers = [], releaseMemory = () => {};
   try {
     instance = await createTool({ noInitialRun: true,
       ...(wasmModule ? { instantiateWasm(imports, receiveInstance) {
@@ -63,6 +64,7 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
       locateFile: name => new URL(directory + name, import.meta.url).href,
       mainScriptUrlOrBlob: url.href,
       preRun: [module => {
+        releaseMemory = trackWasmMemory(module.HEAPU8?.buffer);
         module.FS.init(() => inputIndex < input.length ? input[inputIndex++] : null,
           byte => stdout.push(byte), byte => stderr.push(byte));
         module.FS.mkdir('/work'); module.FS.chdir('/work');
@@ -106,6 +108,7 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
     try { instance?.PThread?.terminateAllThreads(); }
     finally {
       for (const worker of pthreadWorkers) { worker.onmessage = null; worker.onerror = null; }
+      releaseMemory();
       instance = null;
     }
   }

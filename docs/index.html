@@ -6,7 +6,7 @@
   <link rel="icon" href="data:,"><link rel="stylesheet" href="./nap.css">
 </head>
 <body>
-  <header class="app-header"><div class="brand"><span class="brand-mark">NAP</span><div><div class="brand-title"><h1>Nanopore Amplicon Pipeline</h1><!-- app-version:start --><span id="app-version" class="app-version" data-version="1.0.0" data-build="13b416605f09" data-updated-at="2026-10-11T15:05:38.022Z" title="表示中のNAPのバージョン・配布ファイルのビルドID・最終更新日時（日本標準時）">v1.0.0<span class="build-id">ビルド 13b416605f09</span><time class="updated-at" datetime="2026-10-11T15:05:38.022Z">最終更新 2026-10-12 00:05:38 JST</time></span><!-- app-version:end --></div><p>FASTQの分割から、コンセンサス配列・分類まで。</p></div></div><span class="local-badge">● ブラウザ内で解析</span></header>
+  <header class="app-header"><div class="brand"><span class="brand-mark">NAP</span><div><div class="brand-title"><h1>Nanopore Amplicon Pipeline</h1><!-- app-version:start --><span id="app-version" class="app-version" data-version="1.0.0" data-build="451a57f544f2" data-updated-at="2026-10-11T15:24:48.741Z" title="表示中のNAPのバージョン・配布ファイルのビルドID・最終更新日時（日本標準時）">v1.0.0<span class="build-id">ビルド 451a57f544f2</span><time class="updated-at" datetime="2026-10-11T15:24:48.741Z">最終更新 2026-10-12 00:24:48 JST</time></span><!-- app-version:end --></div><p>FASTQの分割から、コンセンサス配列・分類まで。</p></div></div><span class="local-badge">● ブラウザ内で解析</span></header>
   <main>
     <div class="workspace-bar"><div class="tabs" role="tablist" aria-label="解析ステップ">
       <button id="tab-split-reads" role="tab" aria-selected="true" aria-controls="panel-split-reads"><span>01</span> split-reads</button>
@@ -17,7 +17,9 @@
       <summary id="memory-title">メモリーの状況</summary>
       <div class="memory-heading"><div><button id="memory-refresh" type="button">簡易情報を更新</button><button id="memory-measure" type="button" disabled>NAPの使用量を測定</button></div></div>
       <dl class="memory-grid">
-        <div><dt id="memory-app-label">JavaScriptヒープ使用量（参考）</dt><dd id="memory-app-used">確認中…</dd><small id="memory-app-detail"></small></div>
+        <div><dt id="memory-app-label">NAPの使用量（ブラウザー推定）</dt><dd id="memory-app-used">未測定</dd><small id="memory-app-detail"></small></div>
+        <div><dt>JavaScriptヒープ使用量（簡易・参考）</dt><dd id="memory-heap-used">確認中…</dd><small id="memory-live-detail"></small></div>
+        <div><dt>計算用WASMの確保量（実行中）</dt><dd id="memory-wasm-used">0 MiB</dd><small id="memory-wasm-detail"></small></div>
         <div><dt>JSヒープ上限までの差（参考）</dt><dd id="memory-headroom">確認中…</dd><small>空きRAMや、追加で確保できる量ではありません。上限は下の内訳で確認できます。</small></div>
         <div><dt>端末の総RAM（ブラウザー概算）</dt><dd id="memory-device">確認中…</dd><small>ブラウザーが丸めて報告する概算です。PCの空きRAMは取得できません。</small></div>
         <div><dt>NAPの自動メモリー予算（目安）</dt><dd id="memory-auto-budget">確認中…</dd><small id="memory-budget-detail"></small></div>
@@ -26,7 +28,7 @@
         <div><dt>JavaScriptヒープの上限（参考）</dt><dd id="memory-heap-limit">確認中…</dd><small id="memory-heap-detail"></small></div>
         <div><dt>保持している結果ファイルの合計サイズ</dt><dd id="memory-results">0 MiB</dd><small id="memory-results-detail"></small><small>ファイルサイズの合計です。実際のRAM使用量とは異なります。</small></div>
       </dl></details>
-      <p class="memory-note">PCの空きRAM・ブラウザー全体の使用量・NAPが追加で確保できる正確な量は、ブラウザーから取得できません。</p>
+      <p class="memory-note">「簡易情報を更新」はヒープ・WASM情報などを即時更新します。「NAPの使用量を測定」はNAP全体の推定値を取得しますが、結果が返るまで時間がかかります。これらの値は範囲が重なるため、足し合わせて総使用量にはできません。PCの空きRAM・ブラウザー全体の使用量・NAPが追加で確保できる正確な量は、ブラウザーから取得できません。</p>
       <p id="memory-updated" class="memory-note"></p>
     </details></template>
     <section id="panel-split-reads" role="tabpanel" aria-labelledby="tab-split-reads">
