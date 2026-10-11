@@ -28,7 +28,7 @@ server.on('request',(req,res)=>{
 });
 let browser;
 try {
-  browser=await chromium.launch({...(channel==='chromium'?{}:{channel}),headless:true});
+  browser=await chromium.launch({channel,headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
   await page.addInitScript(()=>{
     const NativeWorker=window.Worker,active=new Set();window.annotationTestWorkers=active;

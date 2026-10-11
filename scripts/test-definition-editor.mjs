@@ -15,7 +15,7 @@ const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.
 const base=`http://127.0.0.1:${server.address().port}`,channel=process.env.BROWSER_CHANNEL||'chrome';
 let browser;
 try {
-  browser=await chromium.launch({...(channel==='chromium'?{}:{channel}),headless:true});
+  browser=await chromium.launch({channel,headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],httpErrors=[];
   page.setDefaultTimeout(120000);
   page.on('pageerror',error=>errors.push(error.message));

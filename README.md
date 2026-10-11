@@ -45,7 +45,7 @@ PortablePipelineの [annotation~rRNA-for-metabarcoding](https://github.com/c2997
 
 ## 起動
 
-Node.js 18 以降と Chrome / Edge を使用します。ビルド済み WASM を同梱しているため、解析時に Docker、WSL、Python、Java は不要です。
+Node.js 20 以降と Chrome / Edge を使用します。ビルド済み WASM を同梱しているため、解析時に Docker、WSL、Python、Java は不要です。
 
 ```powershell
 cd "NAP (Nanopore Amplicon Pipeline)"
@@ -239,7 +239,7 @@ FASTQの読み込み・品質別クラスタリングの準備・結果の解析
 
 MAFFTは通常、従来と同じ1つのWorkerで全段階を実行します。メモリー確保に失敗した場合だけ、各段階を個別のWorkerで実行・終了してから次へ進む方法で再試行し、そのサンプル内では以後もこの方法を使用します。整列の入力・アルゴリズム・引数は変更しません。BLAST集計は、確保に失敗したバッチだけを半分に分け、成功したリードを重複計上せずに再試行します。縮小したバッチサイズはそのサンプルの残りの検索にも適用します。MAFFTの `Allocation error` / `Cannot allocate ...` などのネイティブ側の診断もメモリー不足として扱います。これらの復旧は `run.json` の警告に記録します。メモリーが十分な実行ではWorker数・バッチサイズを下げません。
 
-WASMのメモリー確保が失敗した場合は、同時処理上限を半分に下げ、起動済みジョブが減ってから失敗したサンプルを再試行します。完了済みサンプルと検索条件は保持し、低下した上限は後段のBLASTにも適用します。実効上限・再試行回数・警告は`run.json`に記録します。並列実行で既に失敗していても、同時処理が1ジョブになってからの確保失敗を一度再試行します。Worker終了後のメモリー解放を待つため、確保失敗時だけ再試行前の待機を延ばし、単独のジョブの再試行では2秒待ちます。単独のジョブでも確保できない場合は、有限回の再試行後に理由を表示して停止し、進捗ログに元のエラー詳細を残します。入力ファイルの分割や並列数の低下が必要になる場合があります。ブラウザのプロセス自体が終了した場合の自動復旧はできません。
+WASMのメモリー確保が失敗した場合は、同時処理上限を半分に下げ、起動済みジョブが減ってから失敗したサンプルを再試行します。完了済みサンプルと検索条件は保持し、低下した上限は後段のBLASTにも適用します。実効上限・再試行回数・警告は`run.json`に記録します。並列実行で既に失敗していても、同時処理が1ジョブになってからの確保失敗を一度再試行します。単独のジョブでも確保できない場合は、有限回の再試行後に理由を表示して停止し、進捗ログに元のエラー詳細を残します。入力ファイルの分割や並列数の低下が必要になる場合があります。ブラウザのプロセス自体が終了した場合の自動復旧はできません。
 
 `npm run test:consensus-recovery` は、実際のWASMでMAFFTの確保失敗後の整列一致とWorker解放、全位置／変異位置限定pileupのリード・深度・ハプロタイプ一致を確認します。単体テストではBLASTのバッチ縮小、重複のない集計、単一リードでも失敗する場合の有限停止を検証します。
 
@@ -281,7 +281,7 @@ npm ci
 npm test
 ```
 
-インストール済み Chrome と Playwright 1.56.1 を使い、実際のブラウザと WASM で次を確認します。
+インストール済み Chrome と Playwright 1.64.0 を使い、実際のブラウザと WASM で次を確認します。
 
 - 12 リードの並列分割、各 6 リードの配列・品質・ヘッダー。
 - プライマーの2列表、Excel貼り付け、名前に連動するサンプル表、長さの保持、方向情報付きFASTA保存、sample.txt保存・読み戻し、生成入力を使うWASM通し解析。
@@ -306,7 +306,7 @@ npm test
 
 2026-09-27 に Windows Chrome 152 で通し検証済みです。[統合版の検証記録](docs/integration-verification.md)を参照してください。
 
-Edge では `$env:BROWSER_CHANNEL='msedge'; npm test`。Playwright Chromium を使う場合は `npx playwright install chromium` 後に `$env:BROWSER_CHANNEL='chromium'; npm test`（Bash では `BROWSER_CHANNEL=chromium npm test`）です。GitHub Actions は Chromium を使います。
+Edge では `$env:BROWSER_CHANNEL='msedge'; npm test`。Playwright Chromium を使う場合は `npx playwright install --no-shell chromium` 後に `$env:BROWSER_CHANNEL='chromium'; npm test`（Bash では `BROWSER_CHANNEL=chromium npm test`）です。GitHub Actions は Chromium の新しいヘッドレスモードを使い、インストール済み Chrome と同じ方式で検証します。
 
 ## 配置・ソース
 

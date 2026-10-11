@@ -23,7 +23,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 let browser;
 try {
   const channel = process.env.BROWSER_CHANNEL || 'chrome';
-  browser = await chromium.launch({ ...(channel === 'chromium' ? {} : {channel}), headless:true });
+  browser = await chromium.launch({ channel, headless:true });
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.address().port}/get-consensus/`);
   const report = await page.evaluate(async () => {

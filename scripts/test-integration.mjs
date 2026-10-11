@@ -49,7 +49,7 @@ async function checkSavedPage(name,html,archive,kind) {
   } finally {await context.close();}
 }
 try {
-  browser=await chromium.launch({...(channel==='chromium'?{}:{channel}),headless:true});
+  browser=await chromium.launch({channel,headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],requests=[],httpErrors=[];
   page.setDefaultTimeout(180000);
   page.on('pageerror',error=>errors.push(error.message));

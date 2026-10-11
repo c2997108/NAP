@@ -35,7 +35,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const channel = process.env.BROWSER_CHANNEL || 'chrome';
 let browser;
 try {
-  browser = await chromium.launch({ ...(channel === 'chromium' ? {} : { channel }), headless: true });
+  browser = await chromium.launch({ channel, headless: true });
   const page = await browser.newPage(), cdp = await browser.newBrowserCDPSession(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => {

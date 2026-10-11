@@ -40,7 +40,7 @@ const origin = `http://127.0.0.1:${server.address().port}`, base = origin + pref
 const channel = process.env.BROWSER_CHANNEL || 'chrome';
 let browser;
 try {
-  browser = await chromium.launch({ ...(channel === 'chromium' ? {} : { channel }), headless: true });
+  browser = await chromium.launch({ channel, headless: true });
   const context = await browser.newContext(), page = await context.newPage();
   page.setDefaultTimeout(120000);
   const errors = [], requests = [], httpErrors = [], navigations = [];
