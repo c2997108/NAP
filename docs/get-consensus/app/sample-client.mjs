@@ -2,9 +2,15 @@
 export class ConsensusSamples {
   run(kind, payload, { signal, onProgress = () => {} } = {}) {
     signal?.throwIfAborted();
-    const worker = new Worker(new URL('./sample-worker.mjs', import.meta.url), { type: 'module' });
+    let worker = new Worker(new URL('./sample-worker.mjs', import.meta.url), { type: 'module' });
     return new Promise((resolve, reject) => {
-      const done = () => { worker.terminate(); signal?.removeEventListener('abort', abort); };
+      const done = () => {
+        const finished = worker;
+        if (!finished) return;
+        worker = null;
+        finished.onmessage = null; finished.onerror = null;
+        finished.terminate(); signal?.removeEventListener('abort', abort);
+      };
       const abort = () => { done(); reject(signal.reason || new DOMException('Cancelled', 'AbortError')); };
       signal?.addEventListener('abort', abort, { once: true });
       worker.onerror = event => { done(); reject(new Error(event.message)); };

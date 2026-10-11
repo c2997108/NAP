@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { freemem, totalmem } from 'node:os';
 import { createServer } from './serve.mjs';
 
 const output = new URL('../test-results/', import.meta.url);
@@ -33,10 +34,11 @@ server.on('request', (req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
 const channel = process.env.BROWSER_CHANNEL || 'chrome';
-let browser;
+let browser, cdp;
 try {
   browser = await chromium.launch({ channel, headless: true });
-  const page = await browser.newPage(), cdp = await browser.newBrowserCDPSession(), errors = [];
+  const page = await browser.newPage(), errors = [];
+  cdp = await browser.newBrowserCDPSession();
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => {
     const NativeWorker = window.Worker, active = new Set();
@@ -131,4 +133,19 @@ try {
   assert.equal(unfinishedChildren, 0, 'Finished/error jobs terminate owned child workers');
   console.log(`PASS 300 FASTQ files at ${stress.manifest.concurrency.limit} concurrent samples: 900 reads, two representatives, worker cleanup (${Math.round(stress.elapsedMs / 1000)} s)`);
   await writeFile(new URL('consensus-memory-report.json', output), JSON.stringify({ testedAt: new Date().toISOString(), browser: browser.version(), syntheticReadsPerFile: 3, serial, parallel, recovered, qualitySerial, qualityParallel, stress, errors, workerAudit }, null, 2) + '\n');
+} catch (error) {
+  const resources = { hostFreeMB: Math.round(freemem() / 1048576), hostTotalMB: Math.round(totalmem() / 1048576), processes: [] };
+  try {
+    const [{ processInfo }, { targetInfos }] = await Promise.all([cdp.send('SystemInfo.getProcessInfo'), cdp.send('Target.getTargets')]);
+    resources.workerTargets = targetInfos.filter(target => target.type === 'worker').length;
+    if (process.platform === 'linux') resources.processes = await Promise.all(processInfo.map(async ({ id, type }) => {
+      try {
+        const [status, maps] = await Promise.all([readFile(`/proc/${id}/status`, 'utf8'), readFile(`/proc/${id}/maps`, 'utf8')]);
+        return { id, type, memory: status.split('\n').filter(line => /^(VmSize|VmRSS|VmData|VmSwap|Threads):/.test(line)), mappings: maps.trim().split('\n').length };
+      } catch { return { id, type, exited: true }; }
+    }));
+  } catch (diagnosticError) { resources.error = diagnosticError.message; }
+  console.log('Failure memory diagnostics:', JSON.stringify(resources));
+  await writeFile(new URL('consensus-memory-failure.json', output), JSON.stringify({ error: error.message, ...resources }, null, 2) + '\n');
+  throw error;
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

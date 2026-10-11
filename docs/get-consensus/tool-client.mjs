@@ -3,11 +3,15 @@ export class ConsensusTools {
   #jobs = new Set();
   run(tool, args = [], { files = {}, outputs = [], stdin = '', signal, onProgress } = {}) {
     if (signal?.aborted) return Promise.reject(new DOMException('Cancelled', 'AbortError'));
-    const worker = new Worker(new URL('./tool-worker.mjs', import.meta.url), { type: 'module' });
+    let worker = new Worker(new URL('./tool-worker.mjs', import.meta.url), { type: 'module' });
     this.#jobs.add(worker);
     return new Promise((resolve, reject) => {
       const done = () => {
-        worker.terminate(); this.#jobs.delete(worker); signal?.removeEventListener('abort', abort);
+        const finished = worker;
+        if (!finished) return;
+        worker = null;
+        finished.onmessage = null; finished.onerror = null;
+        finished.terminate(); this.#jobs.delete(finished); signal?.removeEventListener('abort', abort);
       };
       const abort = () => { done(); reject(new DOMException('Cancelled', 'AbortError')); };
       signal?.addEventListener('abort', abort, { once: true });
