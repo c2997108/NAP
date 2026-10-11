@@ -11,7 +11,11 @@ const expected = JSON.parse(await readFile(new URL('../public/examples/expected.
 // requests are not exposed by Playwright's routing API. Nothing shipped changes.
 const audit = `const NativeWorker=globalThis.Worker,children=new Set();
 self.addEventListener('message',({data})=>{if(data.__napTestAudit)globalThis.__napTestAudit=new Int32Array(data.__napTestAudit);});
-globalThis.Worker=class extends NativeWorker{constructor(...args){super(...args);children.add(this);Atomics.add(globalThis.__napTestAudit,0,1);}postMessage(data,...args){return super.postMessage({...data,__napTestAudit:globalThis.__napTestAudit.buffer},...args);}terminate(){if(children.delete(this))Atomics.add(globalThis.__napTestAudit,1,1);return super.terminate();}};
+globalThis.Worker=class extends NativeWorker{
+  constructor(...args){super(...args);children.add(this);this.childAudit=new Int32Array(new SharedArrayBuffer(24));Atomics.add(globalThis.__napTestAudit,0,1);}
+  postMessage(data,...args){return super.postMessage({...data,__napTestAudit:this.childAudit.buffer},...args);}
+  terminate(){if(children.delete(this)){for(let i=0;i<6;i++)Atomics.add(globalThis.__napTestAudit,i,Atomics.load(this.childAudit,i));this.childAudit=null;Atomics.add(globalThis.__napTestAudit,1,1);}return super.terminate();}
+};
 const reportMessage=self.postMessage.bind(self);
 self.postMessage=(data,...args)=>{if(data.result||data.error){Atomics.add(globalThis.__napTestAudit,import.meta.url.endsWith('tool-worker.mjs')?2:import.meta.url.endsWith('sample-worker.mjs')?3:4,1);Atomics.add(globalThis.__napTestAudit,5,children.size);}return reportMessage(data,...args);};\n`;
 const workerSources = new Map(await Promise.all(['app/pipeline-worker.mjs', 'app/sample-worker.mjs', 'tool-worker.mjs'].map(async name => {
@@ -45,9 +49,15 @@ try {
     window.__napTestWorkers = active;
     window.__napTestAudit = new Int32Array(new SharedArrayBuffer(24));
     window.Worker = class extends NativeWorker {
-      constructor(...args) { super(...args); active.add(this); Atomics.add(window.__napTestAudit, 0, 1); }
-      postMessage(data, ...args) { return super.postMessage({ ...data, __napTestAudit: window.__napTestAudit.buffer }, ...args); }
-      terminate() { if (active.delete(this)) Atomics.add(window.__napTestAudit, 1, 1); return super.terminate(); }
+      constructor(...args) { super(...args); active.add(this); this.childAudit=new Int32Array(new SharedArrayBuffer(24)); Atomics.add(window.__napTestAudit, 0, 1); }
+      postMessage(data, ...args) { return super.postMessage({ ...data, __napTestAudit: this.childAudit.buffer }, ...args); }
+      terminate() {
+        if (active.delete(this)) {
+          for (let i=0;i<6;i++) Atomics.add(window.__napTestAudit,i,Atomics.load(this.childAudit,i));
+          this.childAudit=null; Atomics.add(window.__napTestAudit, 1, 1);
+        }
+        return super.terminate();
+      }
     };
   });
   await page.goto(base + '/get-consensus/'); await page.waitForFunction(() => window.napConsensus);
