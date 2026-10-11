@@ -72,7 +72,7 @@ try {
             if (window.getConsensus.busy) return;
             clearInterval(timer);
             if (window.getConsensus.result) resolve(window.getConsensus.result);
-            else reject(Error(document.getElementById('status').textContent));
+            else reject(Error(`${document.getElementById('status').textContent}\n${document.getElementById('log').textContent}\nWorker ownership: ${JSON.stringify([...window.__napTestAudit])}`));
           }, 100);
         });
         if (document.getElementById('consensus-progress').value !== 1 || document.querySelectorAll('#consensus-file-progress li').length !== count) throw Error('300-sample UI progress did not finish');
