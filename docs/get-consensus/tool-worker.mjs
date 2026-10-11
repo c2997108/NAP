@@ -41,7 +41,7 @@ function oneThread(tool, args) {
   }
   return result;
 }
-export async function callTool(tool, args, { files = {}, stdin = '', outputs = null } = {}) {
+export async function callTool(tool, args, { files = {}, stdin = '', outputs = null, wasmModule } = {}) {
   if (!commands.has(tool)) throw new Error(`Unknown tool: ${tool}`);
   if (!Array.isArray(args) || args.some(arg => typeof arg !== 'string')) throw new Error('CLI arguments must be strings');
   const checkedArgs = oneThread(tool, args);
@@ -55,6 +55,11 @@ export async function callTool(tool, args, { files = {}, stdin = '', outputs = n
   let instance, pthreadWorkers = [];
   try {
     instance = await createTool({ noInitialRun: true,
+      ...(wasmModule ? { instantiateWasm(imports, receiveInstance) {
+        const compiled = new WebAssembly.Instance(wasmModule, imports);
+        receiveInstance(compiled);
+        return compiled.exports;
+      } } : {}),
       locateFile: name => new URL(directory + name, import.meta.url).href,
       mainScriptUrlOrBlob: url.href,
       preRun: [module => {

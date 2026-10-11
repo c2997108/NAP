@@ -8,7 +8,7 @@ import { mapParallel } from '../../get-consensus/app/parallel.mjs';
 import { isMemoryAllocationError } from '../../get-consensus/app/memory.mjs';
 import { outputBlob } from '../../shared/output-blob.mjs';
 export { defaults };
-export async function runAnnotation(input, { tools = new ConsensusTools(), onProgress = () => {}, signal, environment = globalThis.navigator || {} } = {}) {
+export async function runAnnotation(input, { tools = new ConsensusTools({ compiledModules: true }), onProgress = () => {}, signal, environment = globalThis.navigator || {} } = {}) {
   const started = performance.now(), o = validateOptions(input.options), files = new Map(), logs = [], warnings = [];
   const save = (name, text, type = 'text/plain;charset=utf-8') => files.set(name, text instanceof Blob || text?.napOutput === 'byte-parts' ? text : outputBlob([text], { type }));
   const progress = (fraction, phase, detail) => { signal?.throwIfAborted(); onProgress({ fraction: Math.min(.99, fraction), phase, detail }); };

@@ -9,10 +9,18 @@ import { unzipSync,strFromU8 } from '../public/get-consensus/vendor/fflate.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url)),out=path.join(root,'test-results','annotation');await mkdir(out,{recursive:true});
 const full=process.argv.includes('--full-db'),channel=process.env.BROWSER_CHANNEL||'chrome';
 const demo=JSON.parse(await readFile(path.join(root,'public/examples/expected.json'),'utf8'));
-const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}`;
+const prefix='/nap-annotation-test',moduleRequests=new Map();
+const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}${prefix}`;
 let injectedClient;
 const serve=server.listeners('request')[0];server.removeListener('request',serve);
 server.on('request',(req,res)=>{
+  // Match GitHub Pages: a project subpath and service-worker isolation rather
+  // than server COOP/COEP headers. The real-data crash occurred on this path.
+  if(!req.url.startsWith(prefix+'/')) {res.writeHead(404).end();return;}
+  req.url=req.url.slice(prefix.length);
+  const writeHead=res.writeHead;
+  res.writeHead=function(status,headers){const filtered={...headers};for(const key of Object.keys(filtered))if(/^cross-origin-/i.test(key))delete filtered[key];return writeHead.call(this,status,filtered);};
+  if(/^\/shared\/wasm\/(blastn|makeblastdb)\.wasm$/.test(req.url))moduleRequests.set(req.url,(moduleRequests.get(req.url)||0)+1);
   const body=injectedClient&&req.url==='/get-consensus/tool-client.mjs'?injectedClient:null;
   if(body) {
     res.writeHead(200,{'Content-Type':'text/javascript','Cache-Control':'no-cache','Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'require-corp','Cross-Origin-Resource-Policy':'same-origin'});res.end(body);
@@ -23,7 +31,8 @@ try {
   browser=await chromium.launch({channel,headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
   page.setDefaultTimeout(600000);page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(base);await page.waitForFunction(()=>window.nap?.state.annotation && window.nap.state.consensus);
+  await page.goto(base+'/');await page.waitForFunction(()=>window.nap?.state.annotation && window.nap.state.consensus);
+  assert.equal(await page.evaluate(()=>crossOriginIsolated),true,'Service worker isolates headerless project hosting');
   const consensus=page.frame({name:'consensus-frame'}),annotation=page.frame({name:'annotation-frame'});
   const finished=async()=>{await annotation.waitForFunction(()=>!window.napAnnotation.state.busy,null,{timeout:120000});assert.ok(await annotation.evaluate(()=>window.napAnnotation.result),await annotation.locator('#status').textContent());};
   assert.ok(consensus && annotation);assert.equal(await page.getByRole('tab').count(),3);
@@ -66,15 +75,21 @@ try {
   await annotation.locator('#taxonomy-file').setInputFiles({name:'reference.path',mimeType:'text/plain',buffer:Buffer.from(taxonomy)});
   await annotation.locator('#options details summary').click();await annotation.locator('input[name=shardBases]').fill('400');
   await annotation.locator('input[name=batchSize]').fill('1');
+  const modulesBefore=new Map(moduleRequests);
   await annotation.locator('#start').click();await finished();
   const result=await annotation.evaluate(async()=>({manifest:window.napAnnotation.result.manifest,rows:window.napAnnotation.result.rows,input:await window.napAnnotation.result.files.get('all.cnt.seq.qual.txt').text()}));
   assert.equal(result.input,original,'Handoff retains complete seq/qual/count input bytes');
   assert.equal(result.manifest.execution.referenceVolumes,3);assert.equal(result.manifest.nap.stage,'get-consensus');
   assert.equal(result.manifest.summary.annotated,2);
+  for(const tool of ['blastn','makeblastdb']) {
+    const url=`/shared/wasm/${tool}.wasm`;
+    assert.equal((moduleRequests.get(url)||0)-(modulesBefore.get(url)||0),1,`${tool} is loaded once across DB volumes and independent native jobs`);
+  }
   assert.deepEqual(result.rows.map(row=>row.annotation.lca).sort(),['Eukaryota;Genus','Eukaryota;Other;Species_C']);
   assert.deepEqual(result.rows.map(row=>row.counts).sort((a,b)=>a[0]-b[0]),[[0,6],[6,0]]);
   assert.equal(await annotation.locator('#progress').evaluate(element=>element.value),1);
   console.log('PASS actual get-consensus WASM -> exact seq.qual.txt handoff -> sharded BLAST WASM -> global LCA and sample counts');
+  console.log('PASS headerless project hosting and one WASM module load per tool across native jobs');
   console.log('Parallel execution:',JSON.stringify(result.manifest.execution.concurrency));
   assert.equal(result.manifest.execution.concurrency.peak,2);
   assert.equal(result.manifest.execution.concurrency.sharedReference,true);

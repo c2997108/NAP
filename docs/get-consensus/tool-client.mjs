@@ -1,7 +1,28 @@
 /** Each job owns a disposable worker, so C/C++ global state never crosses runs. */
 export class ConsensusTools {
   #jobs = new Set();
+  #modules = new Map();
+  constructor({ compiledModules = false } = {}) { this.compiledModules = compiledModules; }
   run(tool, args = [], { files = {}, outputs = [], stdin = '', signal, onProgress } = {}) {
+    if (signal?.aborted) return Promise.reject(new DOMException('Cancelled', 'AbortError'));
+    if (this.compiledModules && ['blastn', 'makeblastdb'].includes(tool)) {
+      // Keep the compiled code alive for this pipeline, while each native job
+      // still gets its own instance, heap and disposable worker.
+      if (!this.#modules.has(tool)) {
+        const pending = (async () => {
+          const url = new URL(`../shared/wasm/${tool}.wasm`, import.meta.url);
+          const response = await fetch(url);
+          if (!response.ok) throw Error(`${tool}: WASMを読み込めません (HTTP ${response.status})`);
+          return WebAssembly.compile(await response.arrayBuffer());
+        })();
+        this.#modules.set(tool, pending);
+        pending.catch(() => { if (this.#modules.get(tool) === pending) this.#modules.delete(tool); });
+      }
+      return this.#modules.get(tool).then(wasmModule => this.#run(tool, args, { files, outputs, stdin, signal, onProgress }, wasmModule));
+    }
+    return this.#run(tool, args, { files, outputs, stdin, signal, onProgress });
+  }
+  #run(tool, args, { files, outputs, stdin, signal, onProgress }, wasmModule) {
     if (signal?.aborted) return Promise.reject(new DOMException('Cancelled', 'AbortError'));
     let worker = new Worker(new URL('./tool-worker.mjs', import.meta.url), { type: 'module' });
     this.#jobs.add(worker);
@@ -26,7 +47,7 @@ export class ConsensusTools {
         if (data.error) reject(Object.assign(new Error(data.error), { code: data.code }));
         else resolve(data.result);
       };
-      try { worker.postMessage({ tool, args, files, outputs, stdin }); }
+      try { worker.postMessage({ tool, args, files, outputs, stdin, ...(wasmModule ? { wasmModule } : {}) }); }
       catch (error) { done(); reject(error); }
     });
   }
